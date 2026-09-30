@@ -1,0 +1,2 @@
+<catalog><product sku="A1"><name>Bolt</name><price>2.5</price><vendor><name>Acme</name><country>IN</country></vendor></product>
+<product sku="B2"><name>Gear</name><price>12.0</price><vendor><name>Globex</name><country>DE</country></vendor></product></catalog>

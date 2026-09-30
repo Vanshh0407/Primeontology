@@ -1,0 +1,4 @@
+customer_id,customer_name,customer_type,region,created_at
+1,Initech,Enterprise,Maharashtra,2025-01-04
+2,Hooli,Enterprise,Karnataka,2025-02-11
+3,Pied Piper,SMB,Gujarat,2025-03-19

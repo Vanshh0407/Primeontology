@@ -1,0 +1,39 @@
+# Prime Ontology — MySQL + Django API (:8008) + React workbench (:3008)
+#   cp .env.example .env   # set PRIME_DB_PASSWORD
+#   docker compose up --build
+# Then open http://localhost:3008 and connect to host "mysql", user "root", database "primeontology_demo".
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${PRIME_DB_PASSWORD:?set PRIME_DB_PASSWORD in .env}
+      MYSQL_DATABASE: primeontology
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/init_demo_db.sql:/docker-entrypoint-initdb.d/10_demo.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  backend:
+    build: { context: ., dockerfile: docker/backend.Dockerfile }
+    depends_on: { mysql: { condition: service_healthy } }
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-production}
+      PRIME_DB_ENGINE: mysql
+      PRIME_DB_HOST: mysql
+      PRIME_DB_NAME: primeontology
+      PRIME_DB_USER: root
+      PRIME_DB_PASSWORD: ${PRIME_DB_PASSWORD}
+      # DEMO ONLY: creates the well-known login admin / admin123. Set to 0 (and create real users) for anything shared.
+      PRIME_SEED_DEMO_USER: ${PRIME_SEED_DEMO_USER:-1}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports: ["8008:8008"]
+  frontend:
+    build: { context: ., dockerfile: docker/frontend.Dockerfile }
+    depends_on: [backend]
+    ports: ["3008:3008"]
+volumes:
+  mysql-data:

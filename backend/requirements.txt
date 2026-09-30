@@ -1,0 +1,11 @@
+Django>=5.0,<6.0
+rdflib>=7.0
+PyMySQL>=1.1
+openpyxl>=3.1
+pyyaml>=6
+pypdf>=4
+python-docx>=1.1
+python-pptx>=1.0
+beautifulsoup4>=4.12
+owlrl>=6.0
+pyshacl>=0.26

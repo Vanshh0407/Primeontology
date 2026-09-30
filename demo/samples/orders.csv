@@ -1,0 +1,4 @@
+order_id,customer_id,product_id,order_date,quantity,total_amount
+100,1,10,2025-04-01,5,125.50
+101,2,11,2025-04-02,2,80.00
+102,1,11,2025-04-05,1,40.00

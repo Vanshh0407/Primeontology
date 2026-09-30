@@ -1,0 +1,2 @@
+{"customers":[{"id":1,"name":"Initech","address":{"city":"Pune","state":"Maharashtra"},"contracts":[{"id":7,"title":"MSA","value":120000.5,"signed":true}]}],
+ "suppliers":[{"id":1,"name":"Acme Metals","rating":4.5}]}

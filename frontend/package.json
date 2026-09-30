@@ -1,0 +1,47 @@
+{
+  "name": "@prime/ontology-workbench",
+  "version": "1.0.0",
+  "private": false,
+  "description": "Prime Ontology Workbench â€” one React module embedded unchanged in UniContractAI, PrimeSemOnto and PrimeAgentic OS.",
+  "type": "module",
+  "main": "src/workbench/index.js",
+  "exports": {
+    ".": "./src/workbench/index.js",
+    "./sdk": "./src/workbench/api.js"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 3008",
+    "test": "vitest run",
+    "e2e": "node e2e/smoke.mjs"
+  },
+  "peerDependencies": {
+    "@emotion/react": "^11",
+    "@emotion/styled": "^11",
+    "@mui/icons-material": "^5.15",
+    "@mui/material": "^5.15",
+    "react": "^18.2",
+    "react-dom": "^18.2"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
+    "@xyflow/react": "^12.12.0"
+  },
+  "devDependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^5.18.0",
+    "@mui/material": "^5.18.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "playwright-core": "^1.63.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9"
+  },
+  "files": [
+    "src/workbench"
+  ],
+  "license": "UNLICENSED"
+}

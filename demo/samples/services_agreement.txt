@@ -1,0 +1,21 @@
+MASTER SERVICES AGREEMENT
+
+This Master Services Agreement (this "Agreement") is made effective as of January 15, 2026 (the "Effective Date") between Acme Corp ("Supplier") and Globex Ltd ("Customer").
+
+1. SERVICES
+The Supplier shall provide the services described in Schedule 1. The Supplier must deliver all deliverables within thirty (30) days of each order. The Service Level Agreement defines uptime targets.
+
+2. PAYMENT TERMS
+The Customer shall pay each invoice within thirty (30) days of receipt. Fees are USD 12,500 per month. Late payment incurs a penalty of 1.5% per month.
+
+3. TERM AND TERMINATION
+This Agreement shall expire on January 14, 2029 unless terminated earlier. Either party may terminate for material breach.
+
+4. CONFIDENTIALITY
+Each party agrees to keep Confidential Information secret.
+
+5. LIABILITY
+The Supplier's liability is limited to fees paid. Neither party is liable for indirect damages.
+
+6. GOVERNING LAW
+This Agreement is governed by the laws of the State of Maharashtra. Disputes shall be resolved by arbitration; the courts of Mumbai have jurisdiction.
