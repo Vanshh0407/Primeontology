@@ -7,7 +7,8 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import TuneIcon from '@mui/icons-material/Tune';
 import OntologyGraph from '../components/OntologyGraph';
 import Explorer from '../components/Explorer';
-import { ClassEditor, RelationshipEditor } from '../components/Inspector';
+import { ClassEditor, IndividualEditor, RelationshipEditor } from '../components/Inspector';
+import { addIndividual, autoGroup, suggestIndividualName } from '../individuals';
 import { EmptyState, NoOntology } from '../components/ui';
 import { addClass, addProperty, setLayout, updateClass, wouldCycle } from '../modelOps';
 import { useWB } from '../context';
@@ -30,7 +31,7 @@ export default function WorkbenchTab() {
   const { surface } = useOnt();
   const compact = useMediaQuery(theme.breakpoints.down('lg')); // tablet/mobile: explorer + inspector become drawers
   const [drawer, setDrawer] = useState(null); // 'explorer' | 'inspector'
-  const [dlg, setDlg] = useState(null); // {type:'class'} | {type:'link', from, to, mode}
+  const [dlg, setDlg] = useState(null); // {type:'class'} | {type:'individual'} | {type:'link', from, to, mode}
   const [form, setForm] = useState({ name: '', parent: null });
 
   // On compact screens, selecting something opens the inspector so the choice is never invisible.
@@ -41,6 +42,8 @@ export default function WorkbenchTab() {
   const submit = () => {
     if (dlg.type === 'class') {
       edit((m) => addClass(m, { name: form.name, parents: form.parent ? [form.parent] : [] }), { select: { kind: 'class', name: form.name }, after: () => setDlg(null) });
+    } else if (dlg.type === 'individual') {
+      edit((m) => addIndividual(m, { name: form.name, class: form.parent }), { select: { kind: 'individual', name: form.name }, after: () => setDlg(null) });
     } else if (dlg.mode === 'relationship') {
       edit((m) => addProperty(m, 'object', { name: form.name, domain: dlg.from, range: dlg.to }), { select: { kind: 'relationship', domain: dlg.from, name: form.name }, after: () => setDlg(null) });
     }
@@ -57,7 +60,13 @@ export default function WorkbenchTab() {
   };
 
   const addClassButton = canEdit && <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => { setForm({ name: '', parent: null }); setDlg({ type: 'class' }); }}>Class</Button>;
-  const explorer = <Explorer model={model} selection={selection} onSelect={(s) => { setSelection(s); if (compact) setDrawer('inspector'); }} />;
+  const openIndividualDialog = () => {
+    const cls = selection?.kind === 'class' ? selection.name : (model.classes[0] || {}).name;
+    if (!cls) { edit(() => { throw new Error('Add a class first: individuals are instances of a class.'); }); return; }
+    setForm({ name: suggestIndividualName(model, cls), parent: cls });
+    setDlg({ type: 'individual' });
+  };
+  const explorer = <Explorer model={model} selection={selection} onSelect={(s) => { setSelection(s); if (compact) setDrawer('inspector'); }} onAddIndividual={canEdit ? openIndividualDialog : undefined} />;
   const inspector = (
     <Box sx={{ p: 2 }}>
       {!selection && (
@@ -66,6 +75,7 @@ export default function WorkbenchTab() {
         </EmptyState>
       )}
       {selection?.kind === 'class' && <ClassEditor key={selection.name} name={selection.name} />}
+      {selection?.kind === 'individual' && <IndividualEditor key={selection.name} name={selection.name} />}
       {selection?.kind === 'relationship' && <RelationshipEditor key={`${selection.domain}.${selection.name}`} domain={selection.domain} name={selection.name} />}
     </Box>
   );
@@ -88,7 +98,7 @@ export default function WorkbenchTab() {
         )}
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <OntologyGraph model={model} selection={selection} onSelect={setSelection} canEdit={canEdit} onConnectClasses={connect}
-            onMoved={(pos) => edit((m) => setLayout(m, pos), { silent: true })} />
+            onMoved={(pos) => edit((m) => setLayout(m, pos), { silent: true })} onAutoGroup={canEdit ? (mode) => edit((m) => autoGroup(m, mode)) : undefined} />
         </Box>
       </Box>
       {!compact && (
@@ -110,12 +120,13 @@ export default function WorkbenchTab() {
         </>
       )}
       <Dialog open={!!dlg} onClose={() => setDlg(null)} fullWidth maxWidth="xs">
-        <DialogTitle>{dlg?.type === 'class' ? 'New class' : `New relationship ${dlg?.from} → ${dlg?.to}`}</DialogTitle>
+        <DialogTitle>{dlg?.type === 'class' ? 'New class' : dlg?.type === 'individual' ? 'New individual' : `New relationship ${dlg?.from} → ${dlg?.to}`}</DialogTitle>
         <DialogContent>
-          <TextField autoFocus fullWidth margin="dense" label={dlg?.type === 'class' ? 'Class name' : 'Relationship name'} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && form.name && submit()} />
+          <TextField autoFocus fullWidth margin="dense" label={dlg?.type === 'class' ? 'Class name' : dlg?.type === 'individual' ? 'Individual name' : 'Relationship name'} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && form.name && submit()} />
           {dlg?.type === 'class' && <Autocomplete sx={{ mt: 1 }} options={model.classes.map((c) => c.name)} value={form.parent} onChange={(_, v) => setForm({ ...form, parent: v })} renderInput={(p) => <TextField {...p} label="Parent class (optional)" />} />}
+          {dlg?.type === 'individual' && <Autocomplete sx={{ mt: 1 }} disableClearable options={model.classes.map((c) => c.name)} value={form.parent} onChange={(_, v) => setForm({ ...form, parent: v, name: suggestIndividualName(model, v) })} renderInput={(p) => <TextField {...p} label="Instance of class" />} />}
         </DialogContent>
-        <DialogActions><Button onClick={() => setDlg(null)}>Cancel</Button><Button variant="contained" disabled={!form.name} onClick={submit}>Create</Button></DialogActions>
+        <DialogActions><Button onClick={() => setDlg(null)}>Cancel</Button><Button variant="contained" disabled={!form.name || (dlg?.type === 'individual' && !form.parent)} onClick={submit}>Create</Button></DialogActions>
       </Dialog>
     </Box>
   );

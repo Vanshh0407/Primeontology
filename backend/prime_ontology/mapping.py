@@ -9,6 +9,8 @@ review workflow. Proposals NEVER modify the ontology.
 import difflib
 import re
 
+from . import embeddings
+
 from .naming import singular, words
 
 ABBREV = {
@@ -98,16 +100,38 @@ def propose_mappings(sources: list[dict], model: dict, top_k=3, min_score=0.35) 
     for p in model["objectProperties"]:
         targets.append({"target": f'{p["domain"]}.{p["name"]}', "kind": "objectProperty", "cls": p["domain"],
                         "toks": tokens(p["name"]), "xsd": None, "alts": [tokens(p["range"])], "range": p["range"]})
+    # Semantic booster: only when a real embedding model is running (the hash fallback adds nothing over the lexical scorer).
+    prov = embeddings.get_provider()
+    use_sem = bool(prov and prov.name == "fastembed")
+    vec = {}
+    if use_sem:
+        readable = lambda s_: " ".join(tokens(s_, canon=False))
+        for t in targets:
+            t["text"] = readable(t["target"].replace(".", " "))
+        field_texts = [readable(f["name"]) for src_ in sources for f in src_["fields"]]
+        texts = list(dict.fromkeys([t["text"] for t in targets] + field_texts))
+        vec = dict(zip(texts, embeddings.embed(texts)))
+
+    def semantic(ftext, ttext):
+        if not use_sem or ftext not in vec or ttext not in vec:
+            return 0.0
+        return max(0.0, min(1.0, (embeddings.cosine(vec[ftext], vec[ttext]) - prov.lo) / (prov.hi - prov.lo)))
+
     out, by_target = [], {}
     for src in sources:
         s_ctx = tokens(src["name"])
         for f in src["fields"]:
             f_toks = tokens(f["name"])
+            f_text = " ".join(tokens(f["name"], canon=False))
             cands = []
             for t in targets:
                 reasons = []
                 if t["kind"] == "class":
                     name_s = max([_sim(f_toks, t["toks"])] + [_sim(f_toks, a) for a in t["alts"] if a]) * 0.92
+                    sem = semantic(f_text, t.get("text", ""))
+                    if sem and 0.5 * name_s + 0.5 * sem > name_s and name_s < 0.9:
+                        name_s = min(0.9, 0.5 * name_s + 0.5 * sem)
+                        reasons.append("semantic similarity (embedding model)")
                     if name_s >= 0.35:
                         reasons.append("field name matches concept name" if name_s > 0.85 else "similar to concept name")
                     score = name_s
@@ -120,6 +144,10 @@ def propose_mappings(sources: list[dict], model: dict, top_k=3, min_score=0.35) 
                     for a in t["alts"]:
                         if a:
                             name_s = max(name_s, _sim(f_toks, a) * 0.9)
+                    sem = semantic(f_text, t.get("text", ""))
+                    if sem and 0.5 * name_s + 0.5 * sem > name_s and name_s < 0.9:
+                        name_s = min(0.9, 0.5 * name_s + 0.5 * sem)
+                        reasons.append("semantic similarity (embedding model)")
                     ctx = max(_sim(s_ctx, class_toks[t["cls"]][0]), *[_sim(s_ctx, a) for a in class_toks[t["cls"]][1:]] or [0])
                     tscore = _type_score(f.get("type"), t["xsd"]) if t["kind"] == "dataProperty" else None
                     if name_s >= 0.99:
@@ -152,7 +180,8 @@ def propose_mappings(sources: list[dict], model: dict, top_k=3, min_score=0.35) 
     n = len(out)
     return {"proposals": out, "duplicates": dups,
             "summary": {"fields": n, "proposed": sum(1 for r in out if r["best"]), "unmapped": sum(1 for r in out if not r["best"]),
-                        "high": sum(1 for r in out if r["best"] and r["best"]["confidence"] == "HIGH")}}
+                        "high": sum(1 for r in out if r["best"] and r["best"]["confidence"] == "HIGH")},
+            "embeddings": embeddings.status()}
 
 
 def sources_from_schema(schema: dict, name: str | None = None) -> list[dict]:

@@ -17,7 +17,8 @@ services:
       timeout: 5s
       retries: 30
   backend:
-    build: { context: ., dockerfile: docker/backend.Dockerfile }
+    build: { context: ., dockerfile: docker/backend.Dockerfile, args: { INSTALL_OPTIONAL: "${INSTALL_OPTIONAL:-1}" } }
+    volumes: ["model-cache:/app/.model_cache"]  # the embedding model downloads once (~130 MB, in the background) and is reused
     depends_on: { mysql: { condition: service_healthy } }
     environment:
       DJANGO_DEBUG: "0"
@@ -31,9 +32,25 @@ services:
       PRIME_SEED_DEMO_USER: ${PRIME_SEED_DEMO_USER:-1}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports: ["8008:8008"]
+  fabric-worker:  # continuous ingestion: syncs every source whose schedule is due
+    build: { context: ., dockerfile: docker/backend.Dockerfile, args: { INSTALL_OPTIONAL: "0" } }
+    command: ["python", "manage.py", "fabric_worker"]
+    depends_on: { mysql: { condition: service_healthy }, backend: { condition: service_started } }
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-production}
+      PRIME_DB_ENGINE: mysql
+      PRIME_DB_HOST: mysql
+      PRIME_DB_NAME: primeontology
+      PRIME_DB_USER: root
+      PRIME_DB_PASSWORD: ${PRIME_DB_PASSWORD}
+      PRIME_ONTOLOGY_EMBEDDINGS: "hash"
+      PRIME_ONTOLOGY_CONNECTOR_HOSTS: ${PRIME_ONTOLOGY_CONNECTOR_HOSTS:-}
+    restart: unless-stopped
   frontend:
     build: { context: ., dockerfile: docker/frontend.Dockerfile }
     depends_on: [backend]
     ports: ["3008:3008"]
 volumes:
   mysql-data:
+  model-cache:

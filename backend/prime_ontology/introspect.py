@@ -9,6 +9,8 @@ Schema shape:
 import re
 from collections import defaultdict
 
+from .records import clamp_rows
+
 
 class IntrospectionError(Exception):
     pass
@@ -65,7 +67,21 @@ def introspect_mysql(cfg: dict, schema: str | None = None) -> dict:
         fks = defaultdict(list)
         for g in grouped.values():
             fks[g["table"]].append({k: g[k] for k in ("columns", "ref_table", "ref_columns")})
-    return _finish({"type": "mysql", "database": cfg["database"], "schema": schema}, tables, pks, fks)
+        samples = {}
+        n = clamp_rows(cfg.get("sampleRows"))
+        if n:  # opt-in: copy up to n rows per table (see records.py for limits and sensitive-column handling)
+            for t in tables:
+                ident = "`" + t.replace("`", "``") + "`"
+                try:
+                    cur.execute(f"SELECT * FROM {ident} LIMIT %s", (n + 1,))  # +1 row so truncation is detectable  # identifier comes from information_schema, quoted
+                    samples[t] = {"columns": [d[0] for d in cur.description], "rows": [list(r) for r in cur.fetchall()]}
+                except Exception:  # unreadable table (privileges, view quirks): skip, the schema is still valid
+                    continue
+    res = _finish({"type": "mysql", "database": cfg["database"], "schema": schema}, tables, pks, fks)
+    for t in res["tables"]:
+        if t["name"] in samples:
+            t["sample"] = samples[t["name"]]
+    return res
 
 
 # ---------------------------------------------------------------- SQL DDL --

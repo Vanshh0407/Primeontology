@@ -45,3 +45,16 @@ class LiveMySQLTests(TestCase):
         self.assertNotIn(PW, bad.content.decode())
         with self.assertRaises(IntrospectionError):
             introspect("mysql", {**CFG, "database": "no_such_database_xyz"})
+
+    def test_sample_records_are_read_linked_and_capped(self):
+        s = introspect("mysql", {**CFG, "sampleRows": 2})
+        sample = {t["name"]: t.get("sample") for t in s["tables"]}
+        self.assertTrue(all(v is None or len(v["rows"]) <= 3 for v in sample.values()))  # n+1 rows fetched to detect truncation
+        m = generator.generate_model(s)
+        from prime_ontology import records
+
+        m2, rep = records.attach_individuals(m, s, 2)
+        self.assertEqual(rep["maxRowsPerTable"], 2)
+        self.assertTrue(all(len([i for i in m2["individuals"] if i["class"] == c["name"]]) <= 2 for c in m["classes"]))
+        none = introspect("mysql", CFG)
+        self.assertTrue(all("sample" not in t for t in none["tables"]))  # off by default: no row data is read

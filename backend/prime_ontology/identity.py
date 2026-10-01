@@ -15,7 +15,7 @@ ROLE_RANK = {"viewer": 1, "editor": 2, "reviewer": 3, "admin": 4}
 # minimum role per capability
 CAPABILITY = {
     "read": "viewer", "write": "editor", "commit": "editor", "submit": "editor",
-    "review": "reviewer", "publish": "admin", "rollback": "admin", "delete": "admin", "govern": "admin",
+    "review": "reviewer", "agent_manage": "admin", "os_manage": "admin", "fabric_manage": "admin", "fabric_sync": "editor", "fabric_decide": "reviewer", "fabric_manage": "admin", "fabric_sync": "editor", "fabric_decide": "reviewer", "publish": "admin", "rollback": "admin", "delete": "admin", "govern": "admin",
 }
 
 
@@ -57,7 +57,28 @@ def django_user_identity(request) -> dict:
     return {"user": user.get_username(), "role": role, "tenant": tenant}
 
 
+def service_identity(request):
+    """A registered host application (R15) authenticates with its service token; it acts with the role it was registered with."""
+    token = request.headers.get("X-Prime-Service-Token", "")
+    if not token:
+        return None
+    import hashlib
+
+    from django.utils import timezone
+
+    from .osplane.models import HostApp
+
+    h = HostApp.objects.select_related("ontology").filter(token_hash=hashlib.sha256(token.encode()).hexdigest(), enabled=True).first()
+    if not h:
+        return {"user": "invalid-service-token", "role": "none", "tenant": "__invalid__"}
+    HostApp.objects.filter(pk=h.pk).update(last_seen_at=timezone.now())
+    return {"user": f"host:{h.key}", "role": h.role, "tenant": h.ontology.tenant}
+
+
 def get_identity(request) -> dict:
+    svc = service_identity(request)
+    if svc is not None:
+        return svc
     path = getattr(settings, "PRIME_ONTOLOGY_IDENTITY", None)
     ident = import_string(path)(request) if path else default_identity(request)
     if ident.get("role") not in ROLE_RANK:

@@ -1,6 +1,6 @@
 // End-to-end smoke test: drives the real UI in Chrome against the live backend + MySQL.
 // Usage: MYSQL_TEST_PASSWORD=... node e2e/smoke.mjs   (env: BASE_URL, MYSQL_TEST_USER, MYSQL_TEST_DB, MYSQL_TEST_HOST)
-import { chromium } from 'playwright-core';
+import { launch } from './lib.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -21,7 +21,7 @@ const step = async (name, fn) => {
   }
 };
 
-const browser = await chromium.launch({ executablePath: chrome, headless: true });
+const browser = await launch();
 const page = await (await browser.newContext({ viewport: { width: 1500, height: 900 } })).newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
@@ -212,7 +212,10 @@ await step('R5 assistant: proposal -> diff -> approve (never silent)', async () 
 });
 
 await step('R10 agentic: register tool + policy, plan respects policy', async () => {
-  if (await page.getByTestId('tab-agentic').count()) throw new Error('Agents tab must be hidden outside PrimeAgentic OS');
+  await page.goto(`${BASE}/?context=unicontractai&ontology=${ontologyId}&role=admin&user=e2e.admin`);
+  await page.getByTestId('prime-ontology-workbench').waitFor();
+  // the host's capability list arrives asynchronously; the tab must be gone once it has
+  await page.waitForFunction(() => !document.querySelector('[data-testid="tab-agentic"]'), null, { timeout: 8000 }).catch(() => { throw new Error('Agents tab must stay hidden for UniContractAI (contract-focused host)'); });
   await page.goto(`${BASE}/?context=primeagenticos&ontology=${ontologyId}&role=admin&user=e2e.admin`);
   await tab('agentic');
   await page.getByRole('button', { name: '+ Tool' }).waitFor();

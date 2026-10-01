@@ -1,3 +1,4 @@
+import os
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
@@ -147,3 +148,65 @@ class IngestApiTests(TestCase):
         r = self.client.post("/api/v1/ontology/ingest/", {"file": SimpleUploadedFile("x.exe", b"MZ")})
         self.assertEqual(r.status_code, 400)
         self.assertIn("Unsupported", r.json()["error"])
+
+
+class OcrTests(TestCase):
+    @staticmethod
+    def scanned_pdf(lines_by_page):
+        """Image-only PDF (no text layer) — what a scanner produces."""
+        import io
+
+        from PIL import Image, ImageDraw, ImageFont
+
+        font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 30) if os.path.exists("C:/Windows/Fonts/arial.ttf") else ImageFont.load_default(size=30)
+        imgs = []
+        for lines in lines_by_page:
+            im = Image.new("RGB", (1240, 1000), "white")
+            d = ImageDraw.Draw(im)
+            for i, ln in enumerate(lines):
+                d.text((60, 60 + i * 60), ln, fill="black", font=font)
+            imgs.append(im)
+        b = io.BytesIO()
+        imgs[0].save(b, format="PDF", save_all=True, append_images=imgs[1:])
+        return b.getvalue()
+
+    def test_scanned_pdf_is_ocrd_with_page_provenance(self):
+        from prime_ontology.ingest.documents import ocr_available
+
+        if not ocr_available():
+            self.skipTest("OCR packages not installed")
+        pdf = self.scanned_pdf([["SERVICES AGREEMENT", "This Agreement is between Acme and Globex."],
+                                ["PAYMENT TERMS", "The Customer shall pay each invoice within 30 days."]])
+        res = ingest.analyze("scan.pdf", pdf)
+        self.assertTrue(any("OCR was applied" in w for w in res["warnings"]), res["warnings"])
+        self.assertIn("Payment", names(res))
+        pay = next(c for c in res["model"]["classes"] if c["name"] == "Payment")
+        self.assertTrue(any(e["page"] == 2 for e in pay["evidence"]), pay["evidence"])
+
+    def test_without_ocr_a_scan_is_reported_not_silently_empty(self):
+        os.environ["PRIME_ONTOLOGY_OCR"] = "off"
+        try:
+            with self.assertRaisesRegex(IngestError, "OCR is not available"):
+                ingest.analyze("scan.pdf", self.scanned_pdf([["Payment terms: the customer shall pay"]]))
+        finally:
+            os.environ.pop("PRIME_ONTOLOGY_OCR")
+
+    def test_mixed_pdf_keeps_text_pages_and_ocrs_only_scans(self):
+        from prime_ontology.ingest.documents import ocr_available
+
+        if not ocr_available():
+            self.skipTest("OCR packages not installed")
+        import io
+
+        from pypdf import PdfReader, PdfWriter
+
+        text_pdf = PdfReader(io.BytesIO(make_pdf(["1. CONFIDENTIALITY\nEach party agrees to keep Confidential Information secret."])))
+        scan = PdfReader(io.BytesIO(self.scanned_pdf([["GOVERNING LAW", "This Agreement is governed by the laws of the State of Maharashtra."]])))
+        w = PdfWriter()
+        w.add_page(text_pdf.pages[0])
+        w.add_page(scan.pages[0])
+        out = io.BytesIO()
+        w.write(out)
+        res = ingest.analyze("mixed.pdf", out.getvalue())
+        self.assertIn("Confidentiality", names(res))
+        self.assertIn("GoverningLaw", names(res))

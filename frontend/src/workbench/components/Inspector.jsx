@@ -9,6 +9,10 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import {
   CARDINALITIES, XSD_TYPES, addProperty, deleteClass, deleteProperty, renameClass, updateClass, updateProperty,
 } from '../modelOps';
+import {
+  addIndividual, deleteIndividual, groupsOf, isInstanceOf, propertiesFor, renameIndividual, setGroup, setIndividualLinks, setIndividualValue,
+  suggestIndividualName,
+} from '../individuals';
 import { useWB } from '../context';
 import { MONO, useOnt } from '../theme';
 import { KindChip, KindGlyph, RoleNotice } from './ui';
@@ -45,6 +49,7 @@ export function ClassEditor({ name }) {
   const dps = model.dataProperties.filter((p) => p.domain === name);
   const ops = model.objectProperties.filter((p) => p.domain === name);
   const incoming = model.objectProperties.filter((p) => p.range === name);
+  const instances = (model.individuals || []).filter((i) => i.class === name);
   const dis = !canEdit;
 
   return (
@@ -68,6 +73,9 @@ export function ClassEditor({ name }) {
         <Commit label="Name (IRI local name)" value={c.name} disabled={dis} onCommit={(v) => edit((m) => renameClass(m, name, v), { select: { kind: 'class', name: v } })} />
         <Commit label="Label" value={c.label} disabled={dis} onCommit={(v) => edit((m) => updateClass(m, name, { label: v }))} />
         <Commit label="Description" value={c.comment} multiline minRows={2} disabled={dis} onCommit={(v) => edit((m) => updateClass(m, name, { comment: v }))} />
+        <Autocomplete freeSolo size="small" disabled={dis} options={groupsOf(model)} value={c.group || ''} onChange={(_, v) => edit((m) => setGroup(m, name, (v || '').trim()))}
+          onBlur={(e) => { const v = e.target.value.trim(); if (v !== (c.group || '')) edit((m) => setGroup(m, name, v)); }}
+          renderInput={(p) => <TextField {...p} label="Group (colour + frame in the graph)" />} />
       </Section>
 
       <Section kind="inherit" title="Inheritance & logic" hint="Parents define what this class inherits. Equivalent and disjoint classes feed the reasoner.">
@@ -128,6 +136,11 @@ export function ClassEditor({ name }) {
             <Button size="small" startIcon={<AddIcon />} disabled={!newRel.name || !newRel.range} onClick={() => edit((m) => addProperty(m, 'object', { name: newRel.name, domain: name, range: newRel.range }), { after: () => setNewRel({ name: '', range: '' }) })}>Add</Button>
           </Stack>
         )}
+      </Section>
+
+      <Section kind="provenance" title="Individuals" count={instances.length} hint="Records (instances) of this class. They make queries return real rows.">
+        <Box>{instances.slice(0, 12).map((i) => <Chip key={i.name} size="small" clickable variant="outlined" sx={{ mr: 0.5, mb: 0.5 }} label={i.name} onClick={() => edit(null, { select: { kind: 'individual', name: i.name } })} />)}{instances.length > 12 && <Typography variant="caption" color="text.secondary">+{instances.length - 12} more in the Explorer</Typography>}</Box>
+        {canEdit && <Button size="small" startIcon={<AddIcon />} data-testid="add-individual-inline" onClick={() => { const n = suggestIndividualName(model, name); edit((m) => addIndividual(m, { name: n, class: name }), { select: { kind: 'individual', name: n } }); }}>Add individual</Button>}
       </Section>
 
       {incoming.length > 0 && (
@@ -196,6 +209,58 @@ export function RelationshipEditor({ domain, name }) {
         </Section>
       )}
       {canEdit && <Tooltip title="Delete this relationship"><Button color="error" variant="outlined" startIcon={<DeleteIcon />} onClick={() => edit((m) => deleteProperty(m, 'object', domain, name), { clear: true })}>Delete relationship</Button></Tooltip>}
+    </Stack>
+  );
+}
+
+export function IndividualEditor({ name }) {
+  const { model, edit, canEdit } = useWB();
+  const { kind } = useOnt();
+  const ind = (model.individuals || []).find((i) => i.name === name);
+  if (!ind) return <Typography color="text.secondary">Individual not found.</Typography>;
+  const dis = !canEdit;
+  const props = propertiesFor(model, ind.class);
+  return (
+    <Stack spacing={1.75} data-testid="individual-editor">
+      <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
+        <Stack direction="row" spacing={1.25} alignItems="center" sx={{ minWidth: 0 }}>
+          <KindGlyph kind="provenance" size={20} />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2 }}>Individual (record)</Typography>
+            <Typography variant="h6" component="h2" noWrap>{ind.label || ind.name}</Typography>
+          </Box>
+        </Stack>
+        {canEdit && <Button size="small" color="error" startIcon={<DeleteIcon />} onClick={() => window.confirm(`Delete individual ${name}? Links to it are removed.`) && edit((m) => deleteIndividual(m, name), { clear: true })}>Delete</Button>}
+      </Stack>
+      <RoleNotice cap="write" sx={{ mb: 0 }}>Fields are read-only for your role.</RoleNotice>
+      <Section title="Identity">
+        <Commit label="Name" value={ind.name} disabled={dis} onCommit={(v) => edit((m) => renameIndividual(m, name, v), { select: { kind: 'individual', name: v } })} />
+        <Box><Typography variant="caption" color="text.secondary">Instance of </Typography><KindChip kind="class" label={ind.class} onClick={() => edit(null, { select: { kind: 'class', name: ind.class } })} /></Box>
+        {ind.source && ind.source.table && <Box><Chip size="small" variant="outlined" label={`from ${ind.source.table}${ind.source.row ? ' · row ' + ind.source.row : ''}`} /></Box>}
+      </Section>
+      <Section kind="data" title="Values" count={props.data.length} hint="Typed per the property's datatype. Empty removes the value.">
+        {props.data.length === 0 && <Typography variant="body2" color="text.secondary">{ind.class} has no data properties.</Typography>}
+        {props.data.map((p) => p.datatype === 'boolean' ? (
+          <FormControlLabel key={p.name} disabled={dis} label={`${p.name}${p.required ? ' *' : ''}`} control={<Checkbox checked={ind.data?.[p.name] === true || ind.data?.[p.name] === 'true' || ind.data?.[p.name] === 1} onChange={(e) => edit((m) => setIndividualValue(m, name, p.name, e.target.checked))} />} />
+        ) : (
+          <Commit key={`${name}.${p.name}`} label={`${p.name}${p.required ? ' *' : ''}`} value={ind.data?.[p.name] ?? ''} disabled={dis}
+            type={p.datatype === 'date' ? 'date' : 'text'} InputLabelProps={p.datatype === 'date' ? { shrink: true } : undefined}
+            helperText={p.datatype} FormHelperTextProps={{ sx: { fontFamily: MONO, color: kind.data } }}
+            onCommit={(v) => edit((m) => setIndividualValue(m, name, p.name, v))} />
+        ))}
+      </Section>
+      <Section kind="object" title="Links" count={props.object.length} hint="Connect to other individuals through the class's relationships.">
+        {props.object.length === 0 && <Typography variant="body2" color="text.secondary">{ind.class} has no relationships.</Typography>}
+        {props.object.map((p) => {
+          const options = (model.individuals || []).filter((i) => i.name !== name || p.range === ind.class).filter((i) => isInstanceOf(model, i, p.range)).map((i) => i.name);
+          const value = [].concat(ind.links?.[p.name] || []);
+          return (
+            <Autocomplete key={`${p.domain}.${p.name}`} multiple size="small" disabled={dis} options={options} value={value}
+              onChange={(_, v) => edit((m) => setIndividualLinks(m, name, p.name, v))}
+              renderInput={(params) => <TextField {...params} label={`${p.name} → ${p.range}`} />} />
+          );
+        })}
+      </Section>
     </Stack>
   );
 }

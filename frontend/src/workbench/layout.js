@@ -5,6 +5,8 @@ export const LAYOUTS = [
   { id: 'LR', label: 'Hierarchical (left-right)' },
   { id: 'circle', label: 'Circular' },
   { id: 'grid', label: 'Grid' },
+  { id: 'groups', label: 'Cluster by group' },
+  { id: 'fast', label: 'Fast grid (large graphs)' },
 ];
 export const NODE_W = 190;
 export const NODE_H = 78;
@@ -50,6 +52,7 @@ export function modelToGraph(model) {
     props: model.dataProperties.filter((p) => p.domain === c.name).map((p) => p.name),
     propInfo: model.dataProperties.filter((p) => p.domain === c.name).map((p) => ({ name: p.name, datatype: p.datatype, required: !!p.required })),
     comment: c.comment || '',
+    group: c.group || '',
   }));
   const ids = new Set(nodes.map((n) => n.id));
   const edges = [];

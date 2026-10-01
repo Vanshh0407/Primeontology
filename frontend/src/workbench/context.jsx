@@ -8,7 +8,7 @@ export const useWB = () => {
 };
 
 export const ROLE_RANK = { viewer: 1, editor: 2, reviewer: 3, admin: 4 };
-export const CAPABILITY = { read: 'viewer', write: 'editor', commit: 'editor', submit: 'editor', review: 'reviewer', publish: 'admin', rollback: 'admin', delete: 'admin' };
+export const CAPABILITY = { read: 'viewer', write: 'editor', commit: 'editor', submit: 'editor', review: 'reviewer', publish: 'admin', rollback: 'admin', delete: 'admin', govern: 'admin', fabric_manage: 'admin', fabric_sync: 'editor', fabric_decide: 'reviewer', agent_manage: 'admin', os_manage: 'admin' };
 export const canRole = (role, cap) => (ROLE_RANK[role] || 0) >= ROLE_RANK[CAPABILITY[cap]];
 /** Human wording for each capability, used to explain what a role can and cannot do. Mirrors backend identity.CAPABILITY. */
 export const CAPABILITY_LABEL = {

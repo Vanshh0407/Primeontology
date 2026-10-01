@@ -53,6 +53,7 @@ PRIME_ONTOLOGY_CORS_ORIGINS = os.environ.get(
 # is used and, outside DEBUG, defaults to read-only. The automated test-suite runs as admin.
 if "test" in sys.argv:
     PRIME_ONTOLOGY_DEFAULT_ROLE = "admin"
+    PRIME_ONTOLOGY_EMBEDDINGS = "hash"  # deterministic + offline; the model-backed tests opt in explicitly
 elif os.environ.get("PRIME_STANDALONE_AUTH", "1") == "1":
     # The standalone app requires a login (Django session). Roles: superuser -> admin; group map below; else viewer.
     PRIME_ONTOLOGY_IDENTITY = "prime_ontology.identity.django_user_identity"
@@ -60,3 +61,8 @@ elif os.environ.get("PRIME_STANDALONE_AUTH", "1") == "1":
     PRIME_ONTOLOGY_ROLE_MAP = {"Ontology Viewers": "viewer", "Ontology Editors": "editor",
                                "Ontology Reviewers": "reviewer", "Ontology Admins": "admin"}
     SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SECURE_COOKIES", "0") == "1"
+
+
+# Data-lake roots the fabric may read (name -> absolute folder). Empty = data-lake connectors disabled.
+# Example: PRIME_ONTOLOGY_DATALAKE_ROOTS=lake=/mnt/lake;archive=/mnt/archive
+PRIME_ONTOLOGY_DATALAKE_ROOTS = dict(p.split("=", 1) for p in os.environ.get("PRIME_ONTOLOGY_DATALAKE_ROOTS", "").split(";") if "=" in p)

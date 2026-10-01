@@ -5,7 +5,7 @@ from collections import deque
 
 from rdflib import Graph
 
-from . import generator
+from . import embeddings, generator
 from .naming import singular, words
 from .reasoning import inherited_properties
 from .validation import ancestors
@@ -50,6 +50,24 @@ def search(model: dict, q: str, limit=25) -> list[dict]:
         if score > 0.2:
             hits.append({"kind": kind, "id": ident, "name": name, "label": obj.get("label") or name,
                          "domain": obj.get("domain"), "score": round(score, 3)})
+    # Semantic pass (only with a real embedding model): finds concepts that share no words with the query
+    # ("client" -> Customer) and re-ranks near matches. Reported as `semantic: true` so the UI can say why it matched.
+    prov = embeddings.get_provider()
+    if prov is not None and prov.name == "fastembed" and len(q) >= 3:
+        texts = [" ".join(_tokens(e[2]) + _tokens(e[3].get("label") or "")) or e[2] for e in entries]
+        sims = embeddings.similarities(" ".join(_tokens(q)) or q, texts)
+        by_id = {h["id"]: h for h in hits}
+        for (kind, ident, name, obj), sim in zip(entries, sims):
+            if kind != "class" and sim < 0.6:  # properties are numerous: demand a stronger semantic signal
+                continue
+            if sim < 0.45:
+                continue
+            h = by_id.get(ident)
+            if h:
+                h["score"] = round(min(1.0, h["score"] + 0.25 * sim), 3)
+            else:
+                hits.append({"kind": kind, "id": ident, "name": name, "label": obj.get("label") or name, "domain": obj.get("domain"),
+                             "score": round(0.55 * sim, 3), "semantic": True})
     hits.sort(key=lambda h: -h["score"])
     return hits[:limit]
 

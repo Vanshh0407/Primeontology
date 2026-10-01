@@ -1,6 +1,7 @@
 """Embedding contract (R9): one workbench, per-host context/capabilities."""
 
 TABS = ["sources", "workbench", "mapping", "validation", "explorer", "query", "versions", "assistant", "agentic"]
+ENTERPRISE_TABS = ["fabric", "rag", "twin", "autonomy", "os"]  # R11-R15
 
 HOSTS = {
     "unicontractai": {
@@ -15,7 +16,7 @@ HOSTS = {
         "title": "PrimeSemOnto · Enterprise Semantic Model",
         "vocabulary": ["Enterprise", "Customer", "Supplier", "Product", "Process", "Data", "Organization"],
         "template": "sales",
-        "capabilities": TABS[:-1],
+        "capabilities": TABS + ENTERPRISE_TABS,
         "defaultDocumentMode": False,
         "description": "Central semantic modelling platform: data model, mappings, reasoning, knowledge graph.",
     },
@@ -23,7 +24,7 @@ HOSTS = {
         "title": "PrimeAgentic OS · Agent Ontology",
         "vocabulary": ["Agent", "Tool", "Workflow", "Capability", "Policy", "Data", "BusinessObject", "MCPServer"],
         "template": "agent",
-        "capabilities": TABS,
+        "capabilities": TABS + ENTERPRISE_TABS,
         "defaultDocumentMode": False,
         "description": "Semantic control plane for agents: capabilities, tools, workflows, policies and MCP servers.",
     },
@@ -34,7 +35,7 @@ EVENTS = {"ontology.opened", "ontology.saved", "ontology.published", "concept.se
 
 def manifest() -> dict:
     return {"component": "PrimeOntologyWorkbench", "package": "@prime/ontology-workbench", "apiVersion": "v1",
-            "hosts": sorted(HOSTS), "tabs": TABS, "events": sorted(EVENTS),
+            "hosts": sorted(HOSTS), "tabs": TABS + ENTERPRISE_TABS, "events": sorted(EVENTS),
             "props": {"apiBase": "string (e.g. /api/v1/ontology)", "ontologyId": "number|null", "context": "unicontractai|primesemonto|primeagenticos",
                       "permissions": "{role, user, tenant}", "getAuthHeaders": "() => headers", "onEvent": "(event) => void",
                       "theme": "MUI theme override (host branding)"}}

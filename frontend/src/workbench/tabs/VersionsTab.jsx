@@ -3,6 +3,7 @@ import {
   Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell,
   TableHead, TableRow, Tabs, TextField, Typography,
 } from '@mui/material';
+import BranchesPanel from '../components/BranchesPanel';
 import { DiffLines, NoOntology, PageHeader, Panel, RoleNotice, StatusChip, StepTrack, Why, needs } from '../components/ui';
 import { downloadBlob, useWB } from '../context';
 import { MONO, useOnt } from '../theme';
@@ -69,7 +70,7 @@ export default function VersionsTab() {
           </Why>
         </Stack>
       </Panel>
-      <Tabs value={sub} onChange={(_, v) => setSub(v)} sx={{ mb: 1.5, borderBottom: 1, borderColor: surface.line }}><Tab label={`Versions (${versions.length})`} /><Tab label="Diff" /><Tab label={`Audit trail (${audit.length})`} /></Tabs>
+      <Tabs value={sub} onChange={(_, v) => setSub(v)} sx={{ mb: 1.5, borderBottom: 1, borderColor: surface.line }}><Tab label={`Versions (${versions.length})`} /><Tab label="Diff" /><Tab label={`Audit trail (${audit.length})`} /><Tab label="Branches" data-testid="tab-branches" /></Tabs>
       {sub === 0 && (
         <Paper variant="outlined" sx={{ overflow: 'auto', bgcolor: surface.panel }}>
           {versions.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>No versions yet. Save your edits, then commit the first version above.</Typography>}
@@ -118,6 +119,7 @@ export default function VersionsTab() {
         <Paper variant="outlined" sx={{ overflow: 'auto', bgcolor: surface.panel }}><Table size="small"><TableHead><TableRow><TableCell>When</TableCell><TableCell>Who</TableCell><TableCell>Action</TableCell><TableCell>Detail</TableCell></TableRow></TableHead>
           <TableBody>{audit.map((e) => <TableRow key={e.id}><TableCell sx={{ whiteSpace: 'nowrap' }}>{new Date(e.at).toLocaleString()}</TableCell><TableCell>{e.actor}</TableCell><TableCell sx={{ fontFamily: MONO, fontSize: 12 }}>{e.action}</TableCell><TableCell sx={{ fontSize: 12, maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis' }}>{Object.entries(e.detail).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v).slice(0, 80) : v}`).join(' · ')}</TableCell></TableRow>)}</TableBody></Table></Paper>
       )}
+      {sub === 3 && <BranchesPanel versions={versions} />}
       <Dialog open={!!confirm} onClose={() => setConfirm(null)}>
         <DialogTitle>Roll back to v{confirm?.number}?</DialogTitle>
         <DialogContent>The working copy is replaced by that snapshot and committed as a new draft version. Published versions are not deleted.</DialogContent>

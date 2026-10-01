@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { alpha } from '@mui/material/styles';
-import { Box, Chip, Collapse, InputAdornment, List, ListItemButton, ListItemText, TextField, Typography } from '@mui/material';
+import { Box, Button, Chip, Collapse, InputAdornment, List, ListItemButton, ListItemText, TextField, Typography } from '@mui/material';
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
@@ -27,8 +27,9 @@ function Section({ kind, title, count, children, defaultOpen = true, note }) {
 }
 
 /** Hierarchical class tree + property lists. */
-export default function Explorer({ model, selection, onSelect }) {
+export default function Explorer({ model, selection, onSelect, onAddIndividual }) {
   const [filter, setFilter] = useState('');
+  const [limit, setLimit] = useState(300); // rows rendered per section: thousands of MUI list rows are slow, so big ontologies page
   const { kind } = useOnt();
   const f = filter.trim().toLowerCase();
   const match = (s) => !f || s.toLowerCase().includes(f);
@@ -48,11 +49,14 @@ export default function Explorer({ model, selection, onSelect }) {
     '&.Mui-selected': { bgcolor: alpha(kind.class, 0.14) }, '&.Mui-selected:hover': { bgcolor: alpha(kind.class, 0.2) },
   });
 
+  const budget = { n: 0, hit: false };
   const renderClass = (name, depth, seen = new Set()) => {
     if (seen.has(name)) return null;
     const kids = tree[name] || [];
     const visible = match(name) || kids.some((k) => match(k));
     if (!visible && f) return null;
+    if (budget.n >= limit) { budget.hit = true; return null; }
+    budget.n += 1;
     const next = new Set(seen).add(name);
     const sel = selection?.kind === 'class' && selection.name === name;
     return (
@@ -76,9 +80,12 @@ export default function Explorer({ model, selection, onSelect }) {
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }} />
       </Box>
       <List dense disablePadding component="nav" aria-label="Ontology explorer">
-        <Section kind="class" title="Classes" count={model.classes.length}>{(tree[''] || []).map((n) => renderClass(n, 0))}</Section>
+        <Section kind="class" title="Classes" count={model.classes.length}>
+          {(tree[''] || []).map((n) => renderClass(n, 0))}
+          {budget.hit && <Box sx={{ px: 2, py: 0.75 }}><Button size="small" onClick={() => setLimit((l) => l * 4)} data-testid="explorer-more">Show more classes… (or type in the filter)</Button></Box>}
+        </Section>
         <Section kind="object" title="Object properties" count={objs.length} defaultOpen={false}>
-          {objs.map((p) => {
+          {objs.slice(0, limit).map((p) => {
             const sel = selection?.kind === 'relationship' && selection.domain === p.domain && selection.name === p.name;
             return (
               <ListItemButton key={`${p.domain}.${p.name}`} dense sx={{ pl: 2, ...rowSx(sel) }} selected={sel} onClick={() => onSelect({ kind: 'relationship', domain: p.domain, name: p.name })}>
@@ -88,18 +95,23 @@ export default function Explorer({ model, selection, onSelect }) {
           })}
         </Section>
         <Section kind="data" title="Data properties" count={dats.length} defaultOpen={false}>
-          {dats.slice(0, 500).map((p) => (
+          {dats.slice(0, limit).map((p) => (
             <ListItemButton key={`${p.domain}.${p.name}`} dense sx={{ pl: 2 }} onClick={() => onSelect({ kind: 'class', name: p.domain })}>
               <ListItemText primary={p.name} secondary={`${p.domain} · ${p.datatype}`} primaryTypographyProps={{ fontSize: 13 }} secondaryTypographyProps={{ fontSize: 11, fontFamily: MONO }} />
             </ListItemButton>
           ))}
         </Section>
-        <Section kind="provenance" title="Individuals" count={inds.length} defaultOpen={false} note="Read-only: individuals can be viewed and queried, but there is no individual editor.">
-          {inds.map((i) => (
-            <ListItemButton key={i.name} dense sx={{ pl: 2 }} onClick={() => onSelect({ kind: 'class', name: i.class })}>
-              <ListItemText primary={i.name} secondary={i.class} primaryTypographyProps={{ fontSize: 13 }} secondaryTypographyProps={{ fontSize: 11 }} />
-            </ListItemButton>
-          ))}
+        <Section kind="provenance" title="Individuals" count={inds.length} defaultOpen={inds.length > 0 && inds.length <= 25} note="Records (instances) of your classes. Select one to edit its values and links.">
+          {onAddIndividual && <ListItemButton dense sx={{ pl: 2 }} onClick={onAddIndividual} data-testid="add-individual"><ListItemText primary="+ Add individual" primaryTypographyProps={{ fontSize: 13, color: 'primary' }} /></ListItemButton>}
+          {inds.slice(0, 300).map((i) => {
+            const sel = selection?.kind === 'individual' && selection.name === i.name;
+            return (
+              <ListItemButton key={i.name} dense selected={sel} sx={{ pl: 2, ...rowSx(sel) }} onClick={() => onSelect({ kind: 'individual', name: i.name })}>
+                <ListItemText primary={i.name} secondary={i.class} primaryTypographyProps={{ fontSize: 13, noWrap: true }} secondaryTypographyProps={{ fontSize: 11 }} />
+              </ListItemButton>
+            );
+          })}
+          {inds.length > 300 && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 2, py: 0.5 }}>+{inds.length - 300} more — use the filter to find them.</Typography>}
         </Section>
       </List>
       {model.classes.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>No classes yet. Add one with the “Class” button above.</Typography>}

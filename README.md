@@ -37,6 +37,9 @@ Demo source database: `demo/demo_schema.sql` (MySQL dialect) → create a schema
 Sample files for every importer: `demo/samples/`.
 Standalone URL options: `?context=unicontractai|primesemonto|primeagenticos&ontology=<id>&tab=<tab>` (roles come from the logged-in user).
 
+## Optional capabilities
+`pip install -r backend/requirements-optional.txt` adds **OCR for scanned PDFs** (pypdfium2 + RapidOCR) and the **semantic embedding model** (fastembed; ~130 MB downloaded once, in the background). Both are local — no cloud calls. The app runs without them and the UI says what is active. `ANTHROPIC_API_KEY` enables the LLM assistant/extraction; REST/JSON sources need `PRIME_ONTOLOGY_ALLOWED_URL_HOSTS`. `python scripts/make_samples.py` regenerates the binary demo samples (`shop.db`, `customers.parquet`, `scanned_agreement.pdf`).
+
 ## Layout
 ```
 backend/prime_ontology/   Django app: ingest/, generator, validation, reasoning, query, mapping, versioning, agent, mcp_server, identity, views
@@ -50,10 +53,13 @@ docker/, docker-compose.yml, demo/, docs/
 
 ## Tests
 ```bash
-cd backend && PRIME_DB_ENGINE=mysql PRIME_DB_PASSWORD=... .venv/Scripts/python manage.py test   # 71 tests (creates/drops test_<db>; 2 live-MySQL tests also need PRIME_TEST_MYSQL_PASSWORD)
-cd frontend && npm test                                                                            # 6 unit tests
+cd backend && PRIME_DB_ENGINE=mysql PRIME_DB_PASSWORD=... .venv/Scripts/python manage.py test   # 127 tests (creates/drops test_<db>; 3 live-MySQL tests also need PRIME_TEST_MYSQL_PASSWORD)
+cd frontend && npm test                                                                            # 13 unit tests
 python scripts/test_adapters.py                                                                    # 4 tests: same-code guarantee + installer
 cd frontend && MYSQL_TEST_PASSWORD=... npm run e2e                                                 # 16 browser steps incl. login (needs both servers running and `manage.py seed_demo_users --with-viewer`)
+cd frontend && npm run e2e:features                                                                # 14 steps: records, individuals, groups, branches, concurrency, OCR, Parquet, scale
+cd frontend && node e2e/perf.mjs 300 1000 2000                                                     # large-ontology timings
+backend/.venv/Scripts/python scripts/test_mysql_versions.py                                        # full suite on MySQL 8.4 / MariaDB 10.11 / 11 (+5.7 as a source) in Docker
 ```
 
 ## Docs

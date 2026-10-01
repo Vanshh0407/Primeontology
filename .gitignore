@@ -7,3 +7,4 @@ dist/
 db.sqlite3
 frontend/e2e/screenshots/
 *.tgz
+.model_cache/

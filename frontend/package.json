@@ -14,7 +14,10 @@
     "build": "vite build",
     "preview": "vite preview --port 3008",
     "test": "vitest run",
-    "e2e": "node e2e/smoke.mjs"
+    "e2e": "node e2e/smoke.mjs",
+    "e2e:features": "node e2e/features.mjs",
+    "e2e:enterprise": "node e2e/enterprise.mjs",
+    "e2e:perf": "node e2e/perf.mjs"
   },
   "peerDependencies": {
     "@emotion/react": "^11",

@@ -7,6 +7,7 @@ parsed and validated, and only ever produces *proposals* for human review.
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 API_URL = "https://api.anthropic.com/v1/messages"
@@ -25,7 +26,11 @@ def complete(system: str, user: str, max_tokens: int = 2000, timeout: int = 60) 
         raise RuntimeError("LLM not configured (set ANTHROPIC_API_KEY).")
     body = json.dumps({"model": model_name(), "max_tokens": max_tokens, "system": system,
                        "messages": [{"role": "user", "content": user}]}).encode()
-    req = urllib.request.Request(API_URL, data=body, headers={
+    url = os.environ.get("PRIME_ONTOLOGY_LLM_URL", API_URL)  # override for a gateway/proxy (and for tests against a local stand-in)
+    host = urllib.parse.urlparse(url)
+    if host.scheme != "https" and not (host.scheme == "http" and host.hostname in ("127.0.0.1", "localhost")):
+        raise RuntimeError("PRIME_ONTOLOGY_LLM_URL must be https (http is allowed only for localhost).")
+    req = urllib.request.Request(url, data=body, headers={
         "content-type": "application/json", "x-api-key": os.environ["ANTHROPIC_API_KEY"],
         "anthropic-version": "2023-06-01"})
     try:

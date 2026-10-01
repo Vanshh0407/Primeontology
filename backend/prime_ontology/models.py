@@ -17,12 +17,45 @@ class Ontology(models.Model):
     current_version = models.CharField(max_length=20, blank=True, default="")  # last published/committed
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Optimistic concurrency: bumped only when `model` content changes (not on status/metadata changes), so a reviewer
+    # approving a version does not make an editor's unsaved model edits conflict.
+    model_revision = models.IntegerField(default=1)
+    # Branching: a branch is a full ontology (own versions/workflow) linked to its root, with the model it forked from.
+    branch_of = models.ForeignKey("self", null=True, blank=True, on_delete=models.CASCADE, related_name="branches")
+    branch_name = models.CharField(max_length=100, blank=True, default="")
+    base_version = models.CharField(max_length=20, blank=True, default="")
+    base_snapshot = models.JSONField(null=True, blank=True)
+    merged_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-updated_at"]
 
     def __str__(self):
         return self.name
+
+    @staticmethod
+    def _digest(model) -> str:
+        import hashlib
+        import json
+
+        return hashlib.sha1(json.dumps(model, sort_keys=True, default=str).encode()).hexdigest()
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        obj = super().from_db(db, field_names, values)
+        obj._model_digest = cls._digest(obj.model) if "model" in field_names else None
+        return obj
+
+    def save(self, *args, **kwargs):
+        digest = self._digest(self.model)
+        before = getattr(self, "_model_digest", None)
+        if before is not None and before != digest:
+            self.model_revision += 1
+            fields = kwargs.get("update_fields")
+            if fields is not None:
+                kwargs["update_fields"] = list(set(fields) | {"model_revision"})
+        super().save(*args, **kwargs)
+        self._model_digest = digest
 
 
 class OntologyVersion(models.Model):
@@ -75,3 +108,11 @@ class QueryRecord(models.Model):
 
     class Meta:
         ordering = ["-id"]
+
+
+# Extension models (R11+). Imported last: they reference Ontology above.
+from .fabric import models as _fabric_models  # noqa: E402,F401
+from .rag import models as _rag_models  # noqa: E402,F401
+from .twin import models as _twin_models  # noqa: E402,F401
+from .autonomy import models as _autonomy_models  # noqa: E402,F401
+from .osplane import models as _os_models  # noqa: E402,F401

@@ -17,6 +17,7 @@ export default function MappingTab() {
   const { surface } = useOnt();
   const [rows, setRows] = useState([]);
   const [dups, setDups] = useState([]);
+  const [emb, setEmb] = useState(null); // which matching engine produced the proposals
   const [busy, setBusy] = useState(false);
   const [sets, setSets] = useState([]);
   const [setName, setSetName] = useState('Mapping set');
@@ -39,6 +40,7 @@ export default function MappingTab() {
       const r = await api.mappingPropose(ontology.id, sources);
       setRows(r.proposals);
       setDups(r.duplicates);
+      setEmb(r.embeddings || null);
       notify(`${r.summary.proposed} of ${r.summary.fields} fields mapped (${r.summary.high} high confidence). Nothing is applied until you accept and commit.`, 'info');
     } catch (e) { notify(e.message, 'error'); } finally { setBusy(false); }
   };
@@ -83,6 +85,14 @@ export default function MappingTab() {
             <input ref={fileRef} type="file" multiple hidden onChange={(e) => { fromFiles([...e.target.files]); e.target.value = ''; }} />
           </Stack>
           {busy && <LinearProgress sx={{ mt: 1.5 }} />}
+          {emb && (
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }} data-testid="matching-engine">
+              {emb.semantic
+                ? `Matching: names, abbreviations, synonyms, datatypes and a semantic embedding model (${emb.model}) that links related words.`
+                : emb.warming ? 'Matching: names, abbreviations, synonyms and datatypes (lexical) for now — the semantic embedding model is still loading on the server; propose again in a minute for better matches.'
+                  : 'Matching: names, abbreviations, synonyms and datatypes (lexical). The semantic embedding model is not running on this server' + (emb.fallbackReason ? ` (${emb.fallbackReason})` : '') + '.'}
+            </Typography>
+          )}
         </Panel>
         <Panel kind="mapping" title="Saved mapping sets" sx={{ width: { lg: 340 } }}>
           {sets.length === 0 && <Typography variant="body2" color="text.secondary">None yet. Saved sets appear here, ready to commit.</Typography>}

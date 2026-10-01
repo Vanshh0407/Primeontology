@@ -8,7 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from . import agent as agent_mod
-from . import assistant, embedded, generator, ingest, llm, mapping as mapping_mod, model_ops, query, reasoning, validation, versioning
+from . import assistant, embedded, embeddings, generator, ingest, llm, mapping as mapping_mod, model_ops, query, reasoning, records, validation, versioning
 from .identity import can, get_identity, requires
 from .introspect import IntrospectionError, introspect
 from .models import AuditEvent, MappingSet, Ontology, OntologyVersion, QueryRecord
@@ -17,9 +17,10 @@ from .models import AuditEvent, MappingSet, Ontology, OntologyVersion, QueryReco
 
 
 class ApiError(Exception):
-    def __init__(self, msg, status=400):
+    def __init__(self, msg, status=400, payload=None):
         super().__init__(msg)
         self.status = status
+        self.payload = payload or {}
 
 
 def api(view):
@@ -28,7 +29,7 @@ def api(view):
         try:
             return view(request, *a, **kw)
         except ApiError as e:
-            return JsonResponse({"error": str(e)}, status=e.status)
+            return JsonResponse({**e.payload, "error": str(e)}, status=e.status)
         except versioning.GovernanceForbidden as e:
             return JsonResponse({"error": str(e)}, status=403)
         except (ValueError, KeyError, IntrospectionError, ingest.IngestError, versioning.GovernanceError) as e:
@@ -63,7 +64,8 @@ def get_ontology(request, pk) -> Ontology:
 def summary(o: Ontology) -> dict:
     return {"id": o.id, "name": o.name, "context": o.context, "sourceType": o.source_type, "status": o.status,
             "currentVersion": o.current_version, "stats": generator.stats(o.model) if o.model else {},
-            "updatedAt": o.updated_at.isoformat()}
+            "updatedAt": o.updated_at.isoformat(), "modelRevision": o.model_revision,
+            "branchOf": o.branch_of_id, "branchName": o.branch_name, "mergedAt": o.merged_at.isoformat() if o.merged_at else None}
 
 
 def detail(o: Ontology) -> dict:
@@ -91,14 +93,19 @@ def ensure_draft(o: Ontology, actor: str):
 @api
 @require_http_methods(["GET"])
 def health(request):
-    return JsonResponse({"status": "ok", "service": "prime-ontology", "release": "R10", "aiConfigured": llm.available()})
+    return JsonResponse({"status": "ok", "service": "prime-ontology", "release": "R10", "aiConfigured": llm.available(),
+                         "embeddings": embeddings.status()["provider"]})
 
 
 @api
 @require_http_methods(["GET"])
 def supported(request):
+    from . import url_source
+    from .ingest.documents import ocr_available
+
     return JsonResponse({"databases": ["mysql", "sql"], "files": ingest.SUPPORTED, "aiConfigured": llm.available(),
-                         "exportFormats": list(generator.FORMATS)})
+                         "exportFormats": list(generator.FORMATS), "ocr": ocr_available(), "urlSources": url_source.enabled(),
+                         "embeddings": embeddings.status(), "sampleRecordsMax": records.MAX_ROWS_HARD})
 
 
 # ---------------------------------------------------- sources & ingestion ---
@@ -120,10 +127,18 @@ def generate(request):
     """{name, type, config, save?:bool=true} -> candidate or saved ontology."""
     b = body(request)
     check_db_host(b.get("config", {}))
-    schema = b.get("schema") or introspect(b.get("type", ""), b.get("config", {}))
+    cfg = dict(b.get("config", {}))
+    if b.get("sampleRows"):
+        cfg["sampleRows"] = b["sampleRows"]  # opt-in: copy up to N rows per table in as individuals
+    schema = b.get("schema") or introspect(b.get("type", ""), cfg)
     model = generator.generate_model(schema)
-    result = {"schema": schema, "model": model, "stats": generator.stats(model),
-              "mapping": ingest.source_mapping(schema, model)}
+    mapping = ingest.source_mapping(schema, model)
+    rec_report = None
+    if any(t.get("sample") for t in schema["tables"]):
+        model, rec_report = records.attach_individuals(model, schema, cfg.get("sampleRows"))
+    for t in schema["tables"]:
+        t.pop("sample", None)  # row data stays out of the schema preview
+    result = {"schema": schema, "model": model, "stats": generator.stats(model), "mapping": mapping, "recordsReport": rec_report}
     if b.get("save", True):
         o = Ontology.objects.create(
             name=b.get("name") or f'{schema["source"].get("database", "database")} ontology',
@@ -138,6 +153,22 @@ def generate(request):
 @api
 @requires("write")
 @require_http_methods(["POST"])
+def ingest_url(request):
+    """{url, authorization?} -> reviewable candidate from a JSON REST endpoint. Disabled unless hosts are allow-listed."""
+    from . import url_source
+
+    b = body(request)
+    if not str(b.get("url", "")).strip():
+        raise ApiError("url is required.")
+    try:
+        return JsonResponse(url_source.analyze_url(str(b["url"]).strip(), b.get("authorization") or None))
+    except PermissionError as e:
+        raise ApiError(str(e), 403)
+
+
+@api
+@requires("write")
+@require_http_methods(["POST"])
 def ingest_file(request):
     """multipart: file=<upload>, [ai=1]. Returns a REVIEWABLE candidate; nothing is persisted."""
     f = request.FILES.get("file")
@@ -145,9 +176,8 @@ def ingest_file(request):
         raise ApiError("Upload a file in the 'file' field.")
     if f.size > ingest.MAX_BYTES:
         raise ApiError("File too large.", 413)
-    res = ingest.analyze(f.name, f.read())
-    if request.POST.get("ai") and res["kind"] == "document" and llm.available():
-        res["warnings"].append("AI-refinement of document candidates is applied only via the assistant after review.")
+    # records=N: opt-in copy of up to N rows per table as individuals; ai=1: ask the LLM for extra (verified-quote) concepts
+    res = ingest.analyze(f.name, f.read(), records_per_table=request.POST.get("records") or 0, use_llm=bool(request.POST.get("ai")))
     return JsonResponse(res)
 
 
@@ -202,6 +232,17 @@ def ontology_detail(request, pk):
         b = body(request)
         if "model" in b:
             model_ops.check_shape(b["model"])
+            # Optimistic concurrency: the client says which revision it edited. If someone else saved in between,
+            # refuse (409) with who/when and what overwriting would change, unless the user chose to overwrite.
+            base = b.get("baseRevision")
+            if base is not None and int(base) != o.model_revision and not b.get("force"):
+                last = o.audit.filter(action__in=["model.update", "ai.applied", "mapping.committed", "ontology.merged", "branch.merged",
+                                                  "version.rollback"]).first()
+                raise ApiError("This ontology was changed by someone else since you opened it.", 409, {
+                    "code": "conflict", "currentRevision": o.model_revision, "yourRevision": int(base),
+                    "lastEditor": last.actor if last else None, "lastEditedAt": last.created_at.isoformat() if last else None,
+                    "lastAction": last.action if last else None,
+                    "overwriteWouldChange": versioning.diff(o.model, b["model"])["lines"][:40]})
             before = o.model
             o.model = b["model"]
             ensure_draft(o, request.identity["user"])

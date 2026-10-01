@@ -37,6 +37,16 @@ import KnowledgeTab from './tabs/KnowledgeTab';
 import VersionsTab from './tabs/VersionsTab';
 import AssistantTab from './tabs/AssistantTab';
 import AgenticTab from './tabs/AgenticTab';
+import FabricTab from './tabs/FabricTab';
+import RagTab from './tabs/RagTab';
+import TwinTab from './tabs/TwinTab';
+import AutonomyTab from './tabs/AutonomyTab';
+import OsTab from './tabs/OsTab';
+import SyncIcon from '@mui/icons-material/Sync';
+import QuestionAnswerIcon from '@mui/icons-material/QuestionAnswer';
+import ViewInArIcon from '@mui/icons-material/ViewInAr';
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
 
 const TABS = [
   { id: 'sources', label: 'Import & Sources', cap: ['sources'], C: SourcesTab, Icon: StorageIcon, kind: 'source' },
@@ -47,6 +57,16 @@ const TABS = [
   { id: 'versions', label: 'Versions & Governance', cap: ['versions'], C: VersionsTab, Icon: CallSplitIcon, kind: 'version' },
   { id: 'assistant', label: 'AI Assistant', cap: ['assistant'], C: AssistantTab, Icon: AutoAwesomeIcon, kind: 'ai' },
   { id: 'agentic', label: 'Agents', cap: ['agentic'], C: AgenticTab, Icon: SmartToyIcon, kind: 'ai' },
+  { id: 'fabric', label: 'Knowledge Fabric', cap: ['fabric'], C: FabricTab, Icon: SyncIcon, kind: 'source' },
+  { id: 'rag', label: 'Semantic RAG', cap: ['rag'], C: RagTab, Icon: QuestionAnswerIcon, kind: 'ai' },
+  { id: 'twin', label: 'Digital Twin', cap: ['twin'], C: TwinTab, Icon: ViewInArIcon, kind: 'object' },
+  { id: 'autonomy', label: 'Autonomy', cap: ['autonomy'], C: AutonomyTab, Icon: PrecisionManufacturingIcon, kind: 'ai' },
+  { id: 'os', label: 'Enterprise OS', cap: ['os'], C: OsTab, Icon: DashboardIcon, kind: 'version' },
+];
+const NAV_GROUPS = [
+  { label: 'Model', ids: ['sources', 'workbench', 'mapping', 'validation', 'explorer', 'versions'] },
+  { label: 'Intelligence', ids: ['assistant', 'rag', 'twin'] },
+  { label: 'Enterprise', ids: ['fabric', 'agentic', 'autonomy', 'os'] },
 ];
 const EXPORTS = [['turtle', 'Turtle (.ttl)'], ['xml', 'RDF/XML · OWL (.owl)'], ['json-ld', 'JSON-LD'], ['nt', 'N-Triples']];
 
@@ -113,6 +133,8 @@ function Shell({
   const [newName, setNewName] = useState('');
   const [exportEl, setExportEl] = useState(null);
   const [loadError, setLoadError] = useState('');
+  const [features, setFeatures] = useState({});
+  const [conflict, setConflict] = useState(null); // 409: someone else saved first
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
 
@@ -134,7 +156,7 @@ function Shell({
     } catch (e) { notify(e.message, 'error'); }
   }, [api, notify, context, refreshList]);
 
-  useEffect(() => { refreshList(); api.embeddedContext(context || 'primesemonto').then(setHost).catch(() => setHost(null)); }, [api, context, refreshList]);
+  useEffect(() => { refreshList(); api.embeddedContext(context || 'primesemonto').then(setHost).catch(() => setHost(null)); api.supported().then(setFeatures).catch(() => {}); }, [api, context, refreshList]);
   useEffect(() => { if (ontologyId != null) loadOntology(ontologyId); }, [ontologyId, loadOntology]);
 
   // Compute the next model OUTSIDE React's state updater so validation errors are caught here, not thrown during render.
@@ -157,14 +179,19 @@ function Shell({
 
   const undo = () => setHistory((h) => { if (!h.length) return h; modelRef.current = h[h.length - 1]; setModel(h[h.length - 1]); setDirty(h.length > 1); return h.slice(0, -1); });
 
-  const save = useCallback(async () => {
+  // Optimistic concurrency: we tell the server which model revision we edited. If someone else saved in between the server
+  // answers 409 and we offer: reload theirs / overwrite with mine / keep editing — never a silent overwrite.
+  const save = useCallback(async (force = false) => {
     if (!ontology) return;
     try {
-      const o = await api.save(ontology.id, { model: modelRef.current });
-      setOntology(o); modelRef.current = o.model; setModel(o.model); setDirty(false); setHistory([]);
+      const o = await api.saveModel(ontology.id, modelRef.current, ontology.modelRevision, force === true);
+      setOntology(o); modelRef.current = o.model; setModel(o.model); setDirty(false); setHistory([]); setConflict(null);
       notify('Ontology saved.', 'success'); refreshList(); emit('ontology.saved', { status: o.status });
-    } catch (e) { notify(e.message, 'error'); }
-  }, [api, ontology, model, notify, refreshList, emit]);
+    } catch (e) {
+      if (e.status === 409 && e.data?.code === 'conflict') setConflict(e.data);
+      else notify(e.message, 'error');
+    }
+  }, [api, ontology, notify, refreshList, emit]);
 
   useEffect(() => {
     const h = (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (dirtyRef.current) save(); } };
@@ -192,7 +219,7 @@ function Shell({
   const visible = TABS.filter((t) => (!capabilities || t.cap.some((c) => capabilities.includes(c))) && (!tabFilter || tabFilter.includes(t.id)));
   const active = visible.find((t) => t.id === tab) || visible[0];
   const userName = currentUser?.name || host?.identity?.user;
-  const ctx = { api, ontology, model, edit, dirty, save, loadOntology, refreshList, notify, canEdit, can, host, role, userName, selection, setSelection, tab, setTab, concept, openConcept, emit, context };
+  const ctx = { api, ontology, model, edit, dirty, save, features, loadOntology, refreshList, notify, canEdit, can, host, role, userName, selection, setSelection, tab, setTab, concept, openConcept, emit, context };
   const body = (
     <WorkbenchContext.Provider value={ctx}>
       <Box sx={{ display: 'flex', flexDirection: 'column', height, minHeight: 600, bgcolor: surface.bg, color: 'text.primary' }} data-testid="prime-ontology-workbench" data-context={context}>
@@ -207,6 +234,7 @@ function Shell({
               {(ontology && !list.some((o) => o.id === ontology.id) ? [ontology, ...list] : list).map((o) => <MenuItem key={o.id} value={o.id}><ListItemText primary={o.name} secondary={`${o.stats.classes || 0} classes · ${o.status}`} /></MenuItem>)}
             </Select>
             {canEdit && <Button size="small" startIcon={<AddIcon />} onClick={() => setNewOpen(true)}>New</Button>}
+            {ontology?.branchOf && <Tooltip title="This is a branch of another ontology. Merge it back from Versions & Governance → Branches."><Chip size="small" variant="outlined" icon={<CallSplitIcon />} label={`branch: ${ontology.branchName}`} data-testid="branch-chip" /></Tooltip>}
             {ontology && <StatusChip status={ontology.status} />}
             {ontology?.currentVersion && <Chip size="small" variant="outlined" color="success" label={`published v${ontology.currentVersion}`} />}
             {ontology && (dirty
@@ -217,7 +245,7 @@ function Shell({
               <Stack direction="row" spacing={0.75} alignItems="center">
                 <Tooltip title="Undo last edit"><span><IconButton size="small" aria-label="Undo last edit" disabled={!history.length} onClick={undo}><UndoIcon /></IconButton></span></Tooltip>
                 <Tooltip title={!canEdit ? `Saving requires the ${requiredRole('write')} role or higher.` : dirty ? 'Save changes (Ctrl+S)' : 'Nothing to save'}>
-                  <span><Button size="small" variant={dirty ? 'contained' : 'outlined'} startIcon={<SaveIcon />} disabled={!dirty || !canEdit} onClick={save} aria-label={dirty ? 'Save changes' : 'Saved'}><Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{dirty ? 'Save changes' : 'Saved'}</Box></Button></span>
+                  <span><Button size="small" variant={dirty ? 'contained' : 'outlined'} startIcon={<SaveIcon />} disabled={!dirty || !canEdit} onClick={() => save()} aria-label={dirty ? 'Save changes' : 'Saved'}><Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{dirty ? 'Save changes' : 'Saved'}</Box></Button></span>
                 </Tooltip>
                 <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={(e) => setExportEl(e.currentTarget)} aria-label="Export" aria-haspopup="menu"><Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Export</Box></Button>
                 <Menu anchorEl={exportEl} open={!!exportEl} onClose={() => setExportEl(null)}>
@@ -234,18 +262,60 @@ function Shell({
               {onLogout && <Button size="small" data-testid="logout" startIcon={<LogoutIcon />} aria-label="Sign out" sx={{ '& .MuiButton-startIcon': { mr: { xs: 0, xl: 1 } }, minWidth: 0 }} onClick={() => { if (!dirty || window.confirm('Discard unsaved changes and sign out?')) onLogout(); }}><Box component="span" sx={{ display: { xs: 'none', xl: 'inline' } }}>Sign out</Box></Button>}
             </Stack>
           </Stack>
-          <Tabs value={active?.id || false} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile aria-label="Workbench sections" sx={{ minHeight: 44, mt: 0.5 }}>
-            {visible.map((t) => (
-              <Tab key={t.id} value={t.id} label={t.label} icon={<t.Icon sx={{ fontSize: 18, color: t.kind && active?.id === t.id ? kind[t.kind] : undefined }} />} iconPosition="start" sx={{ minHeight: 44, px: 1.75 }} data-testid={`tab-${t.id}`} />
-            ))}
-          </Tabs>
         </Paper>
         {loadError && <Alert severity="error" sx={{ m: 2 }}>Cannot reach the ontology API at {apiBase}: {loadError}</Alert>}
-        <Box component="main" sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>{active && <active.C />}</Box>
+        <Box sx={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <Box component="nav" aria-label="Workbench sections" sx={{ width: { xs: 56, md: 236 }, flexShrink: 0, borderRight: 1, borderColor: surface.line, bgcolor: surface.panel, overflowY: 'auto', py: 1 }}>
+            {NAV_GROUPS.map((g) => {
+              const items = g.ids.map((i) => visible.find((t) => t.id === i)).filter(Boolean);
+              if (!items.length) return null;
+              return (
+                <Box key={g.label} sx={{ mb: 1 }}>
+                  <Typography variant="overline" color="text.secondary" sx={{ display: { xs: 'none', md: 'block' }, px: 2, lineHeight: 2, letterSpacing: 1 }}>{g.label}</Typography>
+                  {items.map((t) => {
+                    const on = active?.id === t.id;
+                    return (
+                      <Tooltip key={t.id} title={t.label} placement="right" disableHoverListener={false}>
+                        <Box component="button" type="button" role="tab" aria-selected={on} data-testid={`tab-${t.id}`} onClick={() => setTab(t.id)}
+                          sx={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 1.25, width: 'calc(100% - 12px)', mx: '6px', px: { xs: 0, md: 1.5 }, py: 0.9, justifyContent: { xs: 'center', md: 'flex-start' },
+                            borderRadius: 1.5, color: on ? 'text.primary' : 'text.secondary', fontWeight: on ? 700 : 500, fontSize: 14,
+                            bgcolor: on ? alpha(t.kind ? kind[t.kind] || '#38bdf8' : '#38bdf8', 0.16) : 'transparent', '&:hover': { bgcolor: on ? undefined : 'action.hover' }, '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main' } }}>
+                          <t.Icon sx={{ fontSize: 20, color: on && t.kind ? kind[t.kind] : undefined }} />
+                          <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>{t.label}</Box>
+                        </Box>
+                      </Tooltip>);
+                  })}
+                </Box>);
+            })}
+          </Box>
+          <Box component="main" sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>{active && <active.C />}</Box>
+        </Box>
         <Dialog open={newOpen} onClose={() => setNewOpen(false)}>
           <DialogTitle>New ontology</DialogTitle>
           <DialogContent><TextField autoFocus fullWidth margin="dense" label="Name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && newName && create()} /></DialogContent>
           <DialogActions><Button onClick={() => setNewOpen(false)}>Cancel</Button><Button variant="contained" disabled={!newName} onClick={create}>Create</Button></DialogActions>
+        </Dialog>
+        <Dialog open={!!conflict} onClose={() => setConflict(null)} maxWidth="sm" fullWidth aria-labelledby="conflict-title">
+          <DialogTitle id="conflict-title">Someone else changed this ontology</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              {conflict?.lastEditor ? <><strong>{conflict.lastEditor}</strong> saved a newer version{conflict.lastEditedAt ? ` at ${new Date(conflict.lastEditedAt).toLocaleString()}` : ''}</> : 'A newer version was saved'} while you were editing
+              (you started from revision {conflict?.yourRevision}, the server is at {conflict?.currentRevision}). Your edits have <strong>not</strong> been saved.
+            </Typography>
+            {conflict?.overwriteWouldChange?.length > 0 && (
+              <>
+                <Typography variant="overline" color="text.secondary">If you overwrite, the server version would change like this</Typography>
+                <Box sx={{ fontFamily: 'monospace', fontSize: 12.5, maxHeight: 180, overflow: 'auto', p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+                  {conflict.overwriteWouldChange.map((l, i) => <div key={i} style={{ color: l[0] === '+' ? kind.data : l[0] === '-' ? '#ff6b6b' : kind.unsaved }}>{l}</div>)}
+                </Box>
+              </>
+            )}
+          </DialogContent>
+          <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
+            <Button onClick={() => setConflict(null)}>Keep editing</Button>
+            <Button color="warning" data-testid="conflict-reload" onClick={() => { setConflict(null); loadOntology(ontology.id); }}>Discard mine, load theirs</Button>
+            <Button variant="contained" color="warning" data-testid="conflict-overwrite" onClick={() => save(true)}>Overwrite with mine</Button>
+          </DialogActions>
         </Dialog>
         <Snackbar key={toast?.key} open={!!toast} autoHideDuration={6000} onClose={() => setToast(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
           {toast ? <Alert severity={toast.severity} onClose={() => setToast(null)} variant="filled" sx={{ maxWidth: 560 }}>{toast.message}</Alert> : undefined}

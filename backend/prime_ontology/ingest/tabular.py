@@ -20,7 +20,7 @@ def _decode(data: bytes) -> str:
     raise IngestError("Cannot decode file text.")
 
 
-def parse_delimited(filename: str, data: bytes, delimiter: str | None = None) -> dict:
+def parse_delimited(filename: str, data: bytes, delimiter: str | None = None, keep_rows: int = 0) -> dict:
     text = _decode(data)
     if delimiter is None:
         try:
@@ -34,12 +34,14 @@ def parse_delimited(filename: str, data: bytes, delimiter: str | None = None) ->
     header, body = [h.strip() or f"column{i+1}" for i, h in enumerate(rows[0])], rows[1:MAX_SAMPLE_ROWS + 1]
     cols = [{"name": h, "type": infer_sql_type([r[i] for r in body if i < len(r)])} for i, h in enumerate(header)]
     table = make_table(_stem(filename), cols, body)
+    if keep_rows:
+        table["sample"] = {"columns": header, "rows": [r + [None] * (len(header) - len(r)) for r in body[:keep_rows + 1]]}
     res = schema_result(filename, "csv", [table])
     res["preview"] = {"columns": header, "rows": body[:10], "rowCount": len(rows) - 1}
     return res
 
 
-def parse_excel(filename: str, data: bytes) -> dict:
+def parse_excel(filename: str, data: bytes, keep_rows: int = 0) -> dict:
     import openpyxl
 
     try:
@@ -56,6 +58,8 @@ def parse_excel(filename: str, data: bytes) -> dict:
         body = rows[1:MAX_SAMPLE_ROWS + 1]
         cols = [{"name": h, "type": python_value_type_col([r[i] for r in body if i < len(r)])} for i, h in enumerate(header)]
         tables.append(make_table(re.sub(r"[^A-Za-z0-9_]+", "_", ws.title).strip("_") or "sheet", cols, body))
+        if keep_rows:
+            tables[-1]["sample"] = {"columns": header, "rows": [list(r) + [None] * (len(header) - len(r)) for r in body[:keep_rows + 1]]}
         preview[ws.title] = {"columns": header, "rows": [[str(c) if c is not None else "" for c in r] for r in body[:10]],
                              "rowCount": len(rows) - 1}
     if not tables:

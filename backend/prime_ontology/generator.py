@@ -171,7 +171,7 @@ def model_to_graph(model: dict, name: str = "Ontology", base_iri: str = DEFAULT_
         for k, v in (ind.get("data") or {}).items():
             pr = next((q for q in model["dataProperties"] if q["name"] == k and q["domain"] == ind["class"]), None)
             if pr:
-                g.add((u, ns[prop_local(model, pr)], Literal(v, datatype=XSD[pr["datatype"]])))
+                g.add((u, ns[prop_local(model, pr)], Literal(v) if pr["datatype"] == "string" else Literal(v, datatype=XSD[pr["datatype"]])))
         for k, v in (ind.get("links") or {}).items():
             pr = next((q for q in model["objectProperties"] if q["name"] == k and q["domain"] == ind["class"]), None)
             for target in (v if isinstance(v, list) else [v]):

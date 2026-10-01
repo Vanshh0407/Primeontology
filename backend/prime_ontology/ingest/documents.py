@@ -1,5 +1,6 @@
 """PDF / DOCX / PPTX / TXT / MD / HTML -> sections [{page, heading, text}]."""
 import io
+import os
 import re
 
 from .common import IngestError
@@ -40,6 +41,53 @@ def split_sections(text: str, page: int | None = None) -> list[dict]:
     return sections
 
 
+OCR_MAX_PAGES = 40  # bound the CPU time spent on one upload
+
+
+def ocr_available() -> bool:
+    if os.environ.get("PRIME_ONTOLOGY_OCR", "auto").lower() == "off":
+        return False
+    try:
+        import pypdfium2  # noqa: F401
+        import rapidocr_onnxruntime  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+_ocr_engine = None
+
+
+def ocr_pages(data: bytes, page_numbers: list[int]) -> dict[int, str]:
+    """Render PDF pages to images and run OCR (RapidOCR/ONNX, fully local). Returns {page_no: text} (1-based)."""
+    global _ocr_engine
+    import numpy as np
+    import pypdfium2 as pdfium
+    from rapidocr_onnxruntime import RapidOCR
+
+    if _ocr_engine is None:
+        _ocr_engine = RapidOCR()
+    pdf = pdfium.PdfDocument(data)
+    out = {}
+    for n in page_numbers[:OCR_MAX_PAGES]:
+        img = pdf[n - 1].render(scale=2.0).to_pil().convert("RGB")
+        result, _ = _ocr_engine(np.array(img))
+        # result rows: [box, text, score]; order top-to-bottom then left-to-right, group into lines by y
+        rows = sorted(((r[0][0][1], r[0][0][0], r[1]) for r in (result or [])), key=lambda x: (round(x[0] / 14), x[1]))
+        lines, cur, last = [], [], None
+        for y, x, text in rows:
+            key = round(y / 14)
+            if last is not None and key != last:
+                lines.append(" ".join(cur))
+                cur = []
+            cur.append(text)
+            last = key
+        if cur:
+            lines.append(" ".join(cur))
+        out[n] = "\n".join(lines)
+    return out
+
+
 def parse_pdf(data: bytes) -> dict:
     from pypdf import PdfReader
 
@@ -51,12 +99,25 @@ def parse_pdf(data: bytes) -> dict:
     except Exception as e:
         raise IngestError(f"Cannot read PDF: {e}") from e
     warnings = []
-    if not any(t.strip() for _, t in pages):
-        raise IngestError("PDF has no extractable text (likely a scanned image). OCR is required — "
-                          "run OCR (e.g. ocrmypdf) and upload the searchable PDF.")
-    empty = [n for n, t in pages if not t.strip()]
+    empty = [n for n, t in pages if len(t.strip()) < 10]
     if empty:
-        warnings.append(f"{len(empty)} page(s) had no extractable text (possible scans): {empty[:10]}")
+        if ocr_available():
+            try:
+                done = ocr_pages(data, empty)
+                pages = [(n, done.get(n, t) if n in done and len(done[n].strip()) > len(t.strip()) else t) for n, t in pages]
+                recovered = [n for n in done if done[n].strip()]
+                warnings.append(f"OCR was applied to {len(recovered)} scanned page(s) {recovered[:10]}; recognised text may contain errors — review the evidence.")
+                if len(empty) > OCR_MAX_PAGES:
+                    warnings.append(f"Only the first {OCR_MAX_PAGES} scanned pages were OCR'd.")
+            except Exception as e:  # OCR is best-effort; never lose the already-extracted text
+                warnings.append(f"OCR failed ({type(e).__name__}); {len(empty)} page(s) have no text.")
+        elif not any(t.strip() for _, t in pages):
+            raise IngestError("PDF has no extractable text (likely a scanned image) and OCR is not available on this server. "
+                              "Install the optional OCR packages (pip install pypdfium2 rapidocr-onnxruntime) or upload a searchable PDF.")
+        else:
+            warnings.append(f"{len(empty)} page(s) had no extractable text (possible scans, OCR unavailable): {empty[:10]}")
+    if not any(t.strip() for _, t in pages):
+        raise IngestError("PDF has no extractable text, even after OCR.")
     sections = []
     carry = None
     for n, text in pages:
