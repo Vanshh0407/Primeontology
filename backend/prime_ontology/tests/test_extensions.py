@@ -1,7 +1,9 @@
+import hashlib
 import json
 import os
 import tempfile
 import time
+from unittest import mock
 from xml.etree import ElementTree as ET
 
 from django.test import TestCase, override_settings
@@ -13,7 +15,7 @@ from prime_ontology.fabric.adapters import DataLakeAdapter
 from prime_ontology.fabric.http import ConnectorError
 from prime_ontology.fabric.models import FabricRecord, FabricSource
 from prime_ontology.fabric.sync import sync_source
-from prime_ontology.osplane.models import Policy
+from prime_ontology.osplane.models import HostApp, Policy
 from prime_ontology.twin import graphs as tgraphs
 
 from .fabric_helpers import make_ontology
@@ -209,6 +211,70 @@ class WorkflowAndAliasTests(TestCase):
         run = self.client.post(f"{base}/run/", data=json.dumps({"goal": "What if Acme credit limit goes to 200?"}), content_type="application/json", **h).json()
         self.assertEqual(run["status"], "succeeded")
         self.assertEqual(self.client.post(f"{base}/recover/", data=json.dumps({"runId": run["id"]}), content_type="application/json", **h).status_code, 400)
+
+
+class FakeN8n:
+    """In-memory stand-in for n8n's public REST API (workflows + credentials)."""
+
+    def __init__(self):
+        self.workflows, self.credentials = [], []
+
+    def __call__(self, method, path, payload=None):
+        if method == "GET" and path.startswith("/workflows"):
+            return {"data": self.workflows, "nextCursor": None}
+        if method == "POST" and path == "/credentials":
+            c = {"id": f"c{len(self.credentials) + 1}", **payload}
+            self.credentials.append(c)
+            return c
+        if method == "POST" and path == "/workflows":
+            w = {"id": f"w{len(self.workflows) + 1}", "active": False, "updatedAt": "2026-10-01T10:00:00Z", **payload}
+            self.workflows.append(w)
+            return w
+        raise AssertionError(f"unexpected n8n call {method} {path}")
+
+
+@override_settings(PRIME_N8N_API_KEY="k", PRIME_N8N_URL="http://n8n:5678", PRIME_WORKFLOW_BASE_URL="http://host.docker.internal:8008")
+class N8nLinkTests(TestCase):
+    def setUp(self):
+        self.o = build()
+        self.a = agents(self.o)
+        self.fake = FakeN8n()
+        patcher = mock.patch("prime_ontology.autonomy.n8n._call", self.fake)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def call(self, method, data=None, role="admin"):
+        url = f"/api/v1/ontology/{self.o.id}/agents/n8n/"
+        h = dict(HTTP_X_PRIME_USER="alice", HTTP_X_PRIME_ROLE=role)
+        return self.client.post(url, data=json.dumps(data), content_type="application/json", **h) if method == "POST" else self.client.get(url, **h)
+
+    def test_push_creates_credential_once_and_lists_workflows(self):
+        r = self.call("POST", {"goal": "What if Acme credit limit goes to 200?"})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["url"], "http://n8n:5678/workflow/w1")
+        node = self.fake.workflows[0]["nodes"][1]
+        self.assertEqual(node["parameters"]["url"], f"http://host.docker.internal:8008/api/v1/ontology/{self.o.id}/agents/execute/")
+        self.assertEqual(node["credentials"]["httpHeaderAuth"]["id"], "c1")
+        headers = {h["name"]: h["value"] for h in node["parameters"]["headerParameters"]["parameters"]}
+        self.assertEqual(headers, {"X-Prime-Client": "n8n"})  # the token lives only in the n8n credential
+        token = self.fake.credentials[0]["data"]["value"]
+        self.assertTrue(HostApp.objects.filter(ontology=self.o, key="n8n-link", token_hash=hashlib.sha256(token.encode()).hexdigest()).exists())
+        self.assertEqual(self.call("POST", {"goal": "What do we know about Acme?"}).status_code, 201)
+        self.assertEqual(len(self.fake.credentials), 1)  # reused, not re-issued
+        listed = self.call("GET").json()
+        self.assertTrue(listed["configured"])
+        self.assertEqual([w["id"] for w in listed["workflows"]], ["w1", "w2"])
+        self.assertEqual(listed["workflows"][0]["steps"], ["simulate"])
+        # the issued token really authenticates as the host app
+        run = self.client.post(node["parameters"]["url"].replace("http://host.docker.internal:8008", ""), data=node["parameters"]["jsonBody"],
+                               content_type="application/json", HTTP_X_PRIME_CLIENT="n8n", HTTP_X_PRIME_SERVICE_TOKEN=token).json()
+        self.assertEqual((run["status"], run["requestedBy"]), ("succeeded", "host:n8n-link"))
+
+    def test_only_admins_push_and_unconfigured_is_reported(self):
+        self.assertEqual(self.call("POST", {"goal": "What if Acme credit limit goes to 200?"}, role="editor").status_code, 403)
+        self.assertEqual(self.call("GET", role="viewer").status_code, 200)
+        with override_settings(PRIME_N8N_API_KEY=""):
+            self.assertFalse(self.call("GET").json()["configured"])
 
 
 class ConflictingEntityRegressionTests(TestCase):

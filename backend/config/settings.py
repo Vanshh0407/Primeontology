@@ -45,6 +45,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 
 # Comma-separated origins allowed to call the API cross-origin (dev only).
+# Base URL written into exported n8n/BPMN workflows (default: the URL the browser used). n8n in Docker: http://host.docker.internal:8008
+PRIME_WORKFLOW_BASE_URL = os.environ.get("PRIME_WORKFLOW_BASE_URL", "")
+# Live n8n link (Autonomy -> "Send to n8n"): the n8n URL as seen from this backend and a key from n8n -> Settings -> n8n API.
+PRIME_N8N_URL = os.environ.get("PRIME_N8N_URL", "http://localhost:5678")
+PRIME_N8N_API_KEY = os.environ.get("PRIME_N8N_API_KEY", "")
+
 PRIME_ONTOLOGY_CORS_ORIGINS = os.environ.get(
     "PRIME_ONTOLOGY_CORS_ORIGINS", "http://localhost:3008,http://127.0.0.1:3008"
 ).split(",")

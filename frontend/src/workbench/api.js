@@ -161,6 +161,8 @@ export function createApi({ apiBase = '/api/v1/ontology', getAuthHeaders, permis
       const res = await request('POST', `${o(id)}/agents/workflow/`, payload, { raw: true });
       return payload.format === 'bpmn' ? res.text() : res.json();
     },
+    agentN8n: (id) => request('GET', `${o(id)}/agents/n8n/`),
+    agentN8nPush: (id, payload) => request('POST', `${o(id)}/agents/n8n/`, payload),
     mcpRegister: (id, name, command) => request('POST', `${o(id)}/agents/mcp/`, { name, command }),
     mcpDiscover: (id, sid) => request('POST', `${o(id)}/agents/mcp/${sid}/discover/`, {}),
     twinGraphViews: (id) => request('GET', `${o(id)}/twin/graph/`),

@@ -10,6 +10,8 @@ import json
 from xml.etree import ElementTree as ET
 
 FORMATS = ("n8n", "bpmn")
+# n8n authenticates as a registered host app (Enterprise OS -> API tokens); the token is never written into the export.
+TOKEN_PLACEHOLDER = "PASTE_PRIME_SERVICE_TOKEN"
 
 
 def _steps(plan: dict) -> list[dict]:
@@ -28,6 +30,9 @@ def to_n8n(plan: dict, ontology_id: int, base_url: str = "http://localhost:8008"
                            "jsonBody": json.dumps({"goal": s.get("title") or s["tool"], "steps": [{"key": s["key"], "tool": s["tool"], "args": s.get("args") or {},
                                                                                                    "agent": s.get("agent"), "operation": s.get("operation", "read"),
                                                                                                    "concepts": s.get("concepts", [])}]}),
+                           "sendHeaders": True, "specifyHeaders": "keypair",
+                           "headerParameters": {"parameters": [{"name": "X-Prime-Client", "value": "n8n"},
+                                                               {"name": "X-Prime-Service-Token", "value": TOKEN_PLACEHOLDER}]},
                            "options": {}},
             "name": s["key"], "type": "n8n-nodes-base.httpRequest", "typeVersion": 4, "position": [250 * (i + 1), 0],
             "notes": f"{s.get('agent') or 'unassigned'} · {s['tool']}" + (" · needs human approval" if needs_approval else "")})

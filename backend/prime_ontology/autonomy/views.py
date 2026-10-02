@@ -1,4 +1,5 @@
 """Autonomous Enterprise Agent Platform API (R14)."""
+from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 
@@ -453,18 +454,47 @@ def agent_workflow(request, pk):
     o = get_ontology(request, pk)
     b = body(request)
     fmt = b.get("format", "n8n")
-    if b.get("runId"):
-        r = _run(o, b["runId"])
-        plan = {"goal": r.goal, "steps": [{"key": s.key, "title": s.title, "tool": s.tool, "args": s.args, "dependsOn": s.depends_on, "operation": s.operation,
-                                          "concepts": s.concepts, "agent": s.agent.name if s.agent else None, "decision": s.decision} for s in r.steps.select_related("agent")]}
-    else:
-        try:
-            plan = planner.plan(o, b.get("goal", ""), _supervisor(o, b))
-        except ValueError as e:
-            raise ApiError(str(e)) from None
-    base = request.build_absolute_uri("/").rstrip("/")
     try:
-        out = workflow.export(plan, fmt, o.id, base)
+        out = workflow.export(_export_plan(o, b), fmt, o.id, _workflow_base(request))
     except ValueError as e:
         raise ApiError(str(e)) from None
     return JsonResponse(out) if fmt == "n8n" else HttpResponse(out, content_type="application/xml")
+
+
+def _export_plan(o, b) -> dict:
+    """The plan of a finished run (runId) or a fresh plan for a goal."""
+    if b.get("runId"):
+        r = _run(o, b["runId"])
+        return {"goal": r.goal, "steps": [{"key": s.key, "title": s.title, "tool": s.tool, "args": s.args, "dependsOn": s.depends_on, "operation": s.operation,
+                                           "concepts": s.concepts, "agent": s.agent.name if s.agent else None, "decision": s.decision} for s in r.steps.select_related("agent")]}
+    try:
+        return planner.plan(o, b.get("goal", ""), _supervisor(o, b))
+    except ValueError as e:
+        raise ApiError(str(e)) from None
+
+
+def _workflow_base(request) -> str:
+    # The URL n8n (or a BPM engine) uses to reach this API; differs from the browser's when it runs in Docker.
+    return (getattr(settings, "PRIME_WORKFLOW_BASE_URL", "") or request.build_absolute_uri("/")).rstrip("/")
+
+
+@api
+@requires("read")
+@require_http_methods(["GET", "POST"])
+def agent_n8n(request, pk):
+    """GET: this ontology's workflows in the linked n8n. POST {goal | runId}: create the workflow in n8n directly."""
+    from . import n8n
+
+    o = get_ontology(request, pk)
+    if not n8n.configured():
+        return JsonResponse({"configured": False, "url": n8n.ui_url(), "workflows": []})
+    try:
+        if request.method == "POST":
+            if not can(request.identity["role"], "os_manage"):
+                raise ApiError("Only an administrator can send workflows to n8n (it issues a service token).", 403)
+            out = n8n.push(o, _export_plan(o, body(request)), _workflow_base(request))
+            versioning.audit(o, "agent.n8n.push", request.identity["user"], workflow=out["id"], name=out["name"][:120])
+            return JsonResponse(out, status=201)
+        return JsonResponse({"configured": True, "url": n8n.ui_url(), "workflows": n8n.list_workflows(o.id)})
+    except n8n.N8nError as e:
+        raise ApiError(str(e), 502) from None

@@ -65,6 +65,7 @@ _routes = [
     path("<int:pk>/autonomous/run/", ag.agent_execute),
     path("<int:pk>/autonomous/recover/", ag.agent_recover),
     path("<int:pk>/agents/workflow/", ag.agent_workflow),
+    path("<int:pk>/agents/n8n/", ag.agent_n8n),
     path("<int:pk>/twin/graph/", tw.graphs),
     path("<int:pk>/rag/export/", rg.export_vectors),
     path("<int:pk>/fabric/sources/<int:sid>/push/", fb.source_push),

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Box, Button, Chip, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Chip, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material';
 import { NoOntology, PageHeader, Panel } from '../components/ui';
 import { useWB } from '../context';
 
@@ -16,18 +16,23 @@ export default function OsTab() {
   const [pol, setPol] = useState({ name: '', effect: 'require_approval', operations: 'update', concepts: '' });
   const [ev, setEv] = useState({ operation: 'update', concepts: '' });
   const [evr, setEvr] = useState(null);
+  const [hosts, setHosts] = useState([]);
+  const [host, setHost] = useState({ key: '', name: '', role: 'editor' });
+  const [newToken, setNewToken] = useState(null);
   const id = ontology?.id;
   const qs = `?ontologyId=${id}`;
   const load = useCallback(async () => {
     if (!id) return;
-    const [s, p, a] = await Promise.all([api.os(`snapshot/${qs}`), api.os(`policies/${qs}`), api.os(`audit/${qs}&limit=15`)]);
-    setSnap(s); setPolicies(p.policies); setAudit(a.events);
+    const [s, p, a, h] = await Promise.all([api.os(`snapshot/${qs}`), api.os(`policies/${qs}`), api.os(`audit/${qs}&limit=15`), api.os(`hosts/${qs}`)]);
+    setSnap(s); setPolicies(p.policies); setAudit(a.events); setHosts(h.hosts);
   }, [api, id, qs]);
   useEffect(() => { load().catch((e) => notify(e.message, 'error')); /* eslint-disable-next-line */ }, [id]);
   if (!ontology) return <NoOntology />;
   const list = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
   const addPolicy = () => api.os('policies/', 'POST', { ontologyId: id, name: pol.name, effect: pol.effect, operations: list(pol.operations), concepts: list(pol.concepts) })
     .then(() => { notify('Policy added', 'success'); load(); }).catch((e) => notify(e.message, 'error'));
+  const addHost = () => api.os('hosts/', 'POST', { ontologyId: id, ...host })
+    .then((r) => { setNewToken(r); setHost({ key: '', name: '', role: 'editor' }); load(); }).catch((e) => notify(e.message, 'error'));
 
   return (
     <Box sx={{ p: { xs: 1.5, md: 3 }, overflow: 'auto', height: '100%' }}>
@@ -67,6 +72,27 @@ export default function OsTab() {
           <Button size="small" onClick={() => api.os('evaluate/', 'POST', { ontologyId: id, operation: ev.operation, concepts: list(ev.concepts), actorType: 'agent' }).then(setEvr).catch((e) => notify(e.message, 'error'))}>Evaluate</Button>
           {evr && <Chip color={EFFECT[evr.decision]} label={`${evr.decision} · risk ${evr.risk.level}${evr.matched.length ? ` · ${evr.matched.map((m) => m.policy).join(', ')}` : ' · by risk'}`} />}
         </Stack>
+      </Panel>
+
+      <Panel title="API tokens (host apps)" subtitle="Lets n8n or another application call this API without a browser login. Send the token as the X-Prime-Service-Token header (plus X-Prime-Client)." sx={{ mt: 2 }}>
+        <Table size="small"><TableHead><TableRow><TableCell>Key</TableCell><TableCell>Name</TableCell><TableCell>Role</TableCell><TableCell>Token</TableCell><TableCell>Last used</TableCell></TableRow></TableHead>
+          <TableBody>{hosts.map((h) => (
+            <TableRow key={h.key}><TableCell>{h.key}{!h.enabled && <Chip size="small" label="disabled" sx={{ ml: 1 }} />}</TableCell><TableCell>{h.name}</TableCell><TableCell>{h.role}</TableCell><TableCell>{h.tokenHint}</TableCell>
+              <TableCell>{h.lastSeenAt ? new Date(h.lastSeenAt).toLocaleString() : 'never'}</TableCell></TableRow>))}</TableBody></Table>
+        {!hosts.length && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>No tokens yet.</Typography>}
+        <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" rowGap={1}>
+          <TextField size="small" label="Key (e.g. n8n)" value={host.key} onChange={(e) => setHost({ ...host, key: e.target.value })} />
+          <TextField size="small" label="Name" value={host.name} onChange={(e) => setHost({ ...host, name: e.target.value })} />
+          <TextField size="small" select label="Role" value={host.role} onChange={(e) => setHost({ ...host, role: e.target.value })} sx={{ width: 140 }}>{['viewer', 'editor', 'reviewer'].map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}</TextField>
+          <Button variant="outlined" disabled={!can('os_manage') || !host.key || !host.name} onClick={addHost}>Create token</Button>
+        </Stack>
+        {newToken && (
+          <Alert severity="warning" sx={{ mt: 1.5 }} onClose={() => setNewToken(null)}
+            action={<Button size="small" onClick={() => navigator.clipboard?.writeText(newToken.token).then(() => notify('Token copied', 'success'))}>Copy</Button>}>
+            Token for <b>{newToken.name}</b> ({newToken.role}) — copy it now, it is shown only once:
+            <Box component="code" sx={{ display: 'block', mt: 0.5, wordBreak: 'break-all' }}>{newToken.token}</Box>
+            In an exported n8n workflow, replace PASTE_PRIME_SERVICE_TOKEN with it.
+          </Alert>)}
       </Panel>
 
       <Panel title="Audit trail" sx={{ mt: 2 }}>

@@ -12,19 +12,22 @@ const ST = { succeeded: 'success', running: 'info', awaiting_approval: 'warning'
 export default function AutonomyTab() {
   const { api, ontology, notify, can, userName } = useWB();
   const [reg, setReg] = useState(null);
-  const [goal, setGoal] = useState('What if Acme credit limit goes to 200?');
+  const [goal, setGoal] = useState('');
   const [plan, setPlan] = useState(null);
   const [run, setRun] = useState(null);
   const [approvals, setApprovals] = useState([]);
   const [busy, setBusy] = useState(false);
   const [ed, setEd] = useState(null);
   const [mcp, setMcp] = useState({ name: '', command: 'builtin' });
+  const [n8n, setN8n] = useState(null);
   const id = ontology?.id;
+  const loadN8n = useCallback(() => (id ? api.agentN8n(id).then(setN8n).catch((e) => setN8n({ configured: true, error: e.message, workflows: [] })) : null), [api, id]);
   const load = useCallback(async () => {
     if (!id) return;
     const [r, a] = await Promise.all([api.agents(id), api.agentApprovals(id)]);
     setReg(r); setApprovals(a.approvals);
-  }, [api, id]);
+    loadN8n(); // n8n being down must not break the rest of the page
+  }, [api, id, loadN8n]);
   useEffect(() => { load().catch((e) => notify(e.message, 'error')); /* eslint-disable-next-line */ }, [id]);
   if (!ontology) return <NoOntology />;
   const wrap = async (fn) => { setBusy(true); try { await fn(); await load(); } catch (e) { notify(e.message, 'error'); } finally { setBusy(false); } };
@@ -37,6 +40,11 @@ export default function AutonomyTab() {
     const p = { name: ed.name, role: ed.role, description: ed.description, capabilities: csv(ed.capabilities), permissions: ed.permissions, scope: csv(ed.scope), tools: csv(ed.tools), goals: csv(ed.goals), enabled: ed.enabled };
     await api.agentSave(id, ed.id, p); setEd(null); notify('Agent saved', 'success');
   });
+  const sendToN8n = () => wrap(async () => {
+    const r = await api.agentN8nPush(id, run ? { runId: run.id } : { goal });
+    notify(`Created "${r.name}" in n8n`, 'success');
+    window.open(r.url, '_blank', 'noopener');
+  });
   const decide = (a, d) => wrap(async () => { const r = await api.agentApprove(id, a.id, d, ''); show(r.run); notify(d === 'approve' ? 'Approved — run resumed' : 'Rejected', 'success'); });
 
   return (
@@ -45,11 +53,13 @@ export default function AutonomyTab() {
         description="A supervisor decomposes the goal, specialist agents do the work, and every step is authorised by agent permissions, your role and enterprise policy — risky ones wait for a second person." />
       <Panel title="Give the agents a goal">
         <Stack direction="row" spacing={1}>
-          <TextField fullWidth size="small" value={goal} onChange={(e) => setGoal(e.target.value)} />
+          <TextField fullWidth size="small" value={goal} onChange={(e) => setGoal(e.target.value)}
+            placeholder="e.g. What if <entity> <attribute> goes to 600?  ·  Tell me about <entity>  ·  Set <entity> <attribute> to 700" />
           <Button disabled={busy} onClick={() => wrap(async () => setPlan(await api.agentRunPlan(id, goal)))}>Plan</Button>
           <Button variant="contained" disabled={busy} onClick={() => wrap(async () => { setPlan(null); show(await api.agentExecute(id, goal)); })}>Run</Button>
           <Button disabled={busy} onClick={() => exportWf('n8n')}>Export n8n</Button>
           <Button disabled={busy} onClick={() => exportWf('bpmn')}>Export BPMN</Button>
+          {n8n?.configured && !n8n.error && <Button disabled={busy || !can('os_manage')} onClick={sendToN8n}>Send to n8n</Button>}
         </Stack>
         {plan && (<Box sx={{ mt: 1 }}>{plan.notes.map((n) => <Alert key={n} severity="warning" sx={{ mb: 0.5 }}>{n}</Alert>)}
           {plan.steps.map((s) => <Typography key={s.key} variant="body2">{s.key}: <b>{s.tool}</b> → {s.agent || 'no agent'} ({s.operation}){s.dependsOn.length ? ` after ${s.dependsOn.join(', ')}` : ''} — {s.title}</Typography>)}</Box>)}
@@ -69,6 +79,19 @@ export default function AutonomyTab() {
                   <TableCell><Chip size="small" color={ST[s.status]} label={s.status.replace('_', ' ')} /></TableCell></TableRow>))}</TableBody></Table>
             <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1 }}>Trace: {run.trace.map((e) => e.kind).join(' → ')}</Typography>
           </Box>)}
+      </Panel>
+
+      <Panel title={`n8n workflows${n8n?.workflows?.length ? ` (${n8n.workflows.length})` : ''}`} subtitle="Workflows in your n8n that run this ontology's agents. n8n triggers them; every step is still governed here."
+        sx={{ mt: 2 }} actions={n8n && <Stack direction="row" spacing={1}><Button size="small" onClick={loadN8n}>Refresh</Button><Button size="small" href={n8n.url} target="_blank" rel="noopener">Open n8n</Button></Stack>}>
+        {n8n && !n8n.configured && <Alert severity="info">n8n is not linked. Create an API key in n8n (Settings → n8n API), put it in <code>.env</code> as <code>PRIME_N8N_API_KEY=…</code> and restart the backend.</Alert>}
+        {n8n?.error && <Alert severity="error">{n8n.error}</Alert>}
+        {n8n?.configured && !n8n.error && !n8n.workflows.length && <Typography variant="body2" color="text.secondary">None yet. Enter a goal above and click “Send to n8n”.</Typography>}
+        {(n8n?.workflows || []).map((w) => (
+          <Stack key={w.id} direction="row" spacing={1} alignItems="center" sx={{ py: 0.5 }}>
+            <Chip size="small" color={w.active ? 'success' : 'default'} label={w.active ? 'active' : 'inactive'} />
+            <Typography variant="body2" sx={{ flex: 1 }}>{w.name} <Typography component="span" variant="caption" color="text.secondary">· {w.steps.join(' → ') || 'no steps'}{w.updatedAt ? ` · updated ${new Date(w.updatedAt).toLocaleString()}` : ''}</Typography></Typography>
+            <Button size="small" href={w.url} target="_blank" rel="noopener">Open in n8n</Button>
+          </Stack>))}
       </Panel>
 
       <Panel title={`Approvals waiting (${approvals.length})`} subtitle="Four-eyes: you cannot approve what you requested." sx={{ mt: 2 }}>

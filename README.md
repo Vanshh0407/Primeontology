@@ -33,6 +33,13 @@ export PRIME_DB_ENGINE=mysql PRIME_DB_PASSWORD=...   # PRIME_DB_HOST/PORT/USER/N
 python manage.py migrate && python manage.py runserver 8008
 cd ../frontend && npm install && npm run dev                              # http://localhost:3008 (proxies /api -> :8008)
 ```
+Windows shortcut: put `PRIME_DB_ENGINE` / `PRIME_DB_PASSWORD` (and optionally `PRIME_WORKFLOW_BASE_URL`) in `.env`, then run
+`powershell -ExecutionPolicy Bypass -File .\start-dev.ps1` — it opens the backend and frontend in their own windows.
+
+**n8n:** create a token under *Enterprise OS → API tokens*, export a plan from *Autonomy → Export n8n*, import it into n8n and replace
+`PASTE_PRIME_SERVICE_TOKEN` in each HTTP node. When n8n runs in Docker, set `PRIME_WORKFLOW_BASE_URL=http://host.docker.internal:8008`
+so exported nodes can reach the backend.
+
 Demo source database: `demo/demo_schema.sql` (MySQL dialect) → create a schema such as `primeontology_demo` and run it.
 Sample files for every importer: `demo/samples/`.
 Standalone URL options: `?context=unicontractai|primesemonto|primeagenticos&ontology=<id>&tab=<tab>` (roles come from the logged-in user).

@@ -25,28 +25,31 @@ export default function AgenticTab() {
   const [plan, setPlan] = useState(null);
   const [ctx, setCtx] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [savedJson, setSavedJson] = useState('');
   const canEdit = canWrite && loaded; // no edits until the registry has loaded (prevents a late response clobbering them)
+  const dirty = loaded && JSON.stringify(reg) !== savedJson; // the planner reads the saved registry, so unsaved edits don't count
   const classes = model.classes.map((c) => c.name);
 
   useEffect(() => {
     if (!ontology) return undefined;
     let alive = true;
     setLoaded(false);
-    api.agentic(ontology.id).then((r) => { if (alive) { setReg(r); setLoaded(true); } }).catch((e) => notify(e.message, 'error'));
+    api.agentic(ontology.id).then((r) => { if (alive) { setReg(r); setSavedJson(JSON.stringify(r)); setLoaded(true); } }).catch((e) => notify(e.message, 'error'));
     return () => { alive = false; };
     // eslint-disable-next-line
   }, [ontology?.id]);
   if (!ontology) return <NoOntology />;
 
   const setList = (key, i, patch) => setReg((r) => ({ ...r, [key]: r[key].map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
-  const save = async () => { try { setReg(await api.saveAgentic(ontology.id, reg)); notify('Agent registry saved to the ontology (draft).', 'success'); await loadOntology(ontology.id); } catch (e) { notify(e.message, 'error'); } };
-  const run = async () => { try { setPlan(await api.agentPlan(ontology.id, request, 'agent')); setCtx(await api.agentContext(ontology.id, request)); } catch (e) { notify(e.message, 'error'); } };
+  const persist = async () => { const r = await api.saveAgentic(ontology.id, reg); setReg(r); setSavedJson(JSON.stringify(r)); await loadOntology(ontology.id); };
+  const save = async () => { try { await persist(); notify('Agent registry saved to the ontology (draft).', 'success'); } catch (e) { notify(e.message, 'error'); } };
+  const run = async () => { try { if (dirty && canEdit) { await persist(); notify('Unsaved registry changes were saved before planning.', 'info'); } setPlan(await api.agentPlan(ontology.id, request, 'agent')); setCtx(await api.agentContext(ontology.id, request)); } catch (e) { notify(e.message, 'error'); } };
 
   return (
     <Box sx={{ p: { xs: 1.5, md: 3 }, overflow: 'auto', height: '100%' }}>
       <PageHeader kind="ai" eyebrow="Agents" title="Ontology-powered agents"
         description="Bind tools, workflows, APIs and MCP servers to concepts, and govern them with ontology-level policies. Agents plan through the ontology before acting."
-        actions={canEdit && <Button variant="contained" onClick={save}>Save registry</Button>} />
+        actions={canEdit && <Stack direction="row" spacing={1} alignItems="center">{dirty && <Chip size="small" color="warning" label="Unsaved changes" />}<Button variant="contained" onClick={save}>Save registry</Button></Stack>} />
       <RoleNotice cap="write">You can inspect the registry and run the planner, but only an editor or higher can change or save it.</RoleNotice>
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
